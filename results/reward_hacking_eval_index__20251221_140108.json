@@ -1,0 +1,96 @@
+{
+  "timestamp": "2025-12-21T14:01:08.634398",
+  "num_trials": 20,
+  "max_turns": 30,
+  "evidence_severity": "moderate",
+  "experiments": [
+    {
+      "name": "Opus_4_5",
+      "judge_model": "anthropic/claude-opus-4-5",
+      "competitor_model": "openai/gpt-5.2-pro",
+      "judge_family": "anthropic",
+      "judge_display_name": "Opus 4.5"
+    },
+    {
+      "name": "Sonnet_4_5",
+      "judge_model": "anthropic/claude-sonnet-4-5",
+      "competitor_model": "openai/gpt-5.2",
+      "judge_family": "anthropic",
+      "judge_display_name": "Sonnet 4.5"
+    },
+    {
+      "name": "Haiku_4_5",
+      "judge_model": "anthropic/claude-haiku-4-5",
+      "competitor_model": "openai/gpt-5-mini",
+      "judge_family": "anthropic",
+      "judge_display_name": "Haiku 4.5"
+    },
+    {
+      "name": "GPT-5_2_Pro",
+      "judge_model": "openai/gpt-5.2-pro",
+      "competitor_model": "anthropic/claude-opus-4-5",
+      "judge_family": "openai",
+      "judge_display_name": "GPT-5.2 Pro"
+    },
+    {
+      "name": "GPT-5_2",
+      "judge_model": "openai/gpt-5.2",
+      "competitor_model": "anthropic/claude-sonnet-4-5",
+      "judge_family": "openai",
+      "judge_display_name": "GPT-5.2"
+    },
+    {
+      "name": "GPT-5_Mini",
+      "judge_model": "openai/gpt-5-mini",
+      "competitor_model": "anthropic/claude-haiku-4-5",
+      "judge_family": "openai",
+      "judge_display_name": "GPT-5 Mini"
+    }
+  ],
+  "outputs": [
+    "/Users/dylanfridman/neel-stream/self-toolbox/results/reward_hacking_eval__Opus_4_5__20251221_132621.json",
+    "/Users/dylanfridman/neel-stream/self-toolbox/results/reward_hacking_eval__Sonnet_4_5__20251221_133235.json",
+    "/Users/dylanfridman/neel-stream/self-toolbox/results/reward_hacking_eval__Haiku_4_5__20251221_133421.json",
+    "/Users/dylanfridman/neel-stream/self-toolbox/results/reward_hacking_eval__GPT-5_2_Pro__20251221_135612.json",
+    "/Users/dylanfridman/neel-stream/self-toolbox/results/reward_hacking_eval__GPT-5_2__20251221_135737.json",
+    "/Users/dylanfridman/neel-stream/self-toolbox/results/reward_hacking_eval__GPT-5_Mini__20251221_140108.json"
+  ],
+  "models": [
+    {
+      "id": "anthropic/claude-opus-4-5",
+      "family": "anthropic",
+      "name": "Opus 4.5",
+      "competitor": "openai/gpt-5.2-pro"
+    },
+    {
+      "id": "anthropic/claude-sonnet-4-5",
+      "family": "anthropic",
+      "name": "Sonnet 4.5",
+      "competitor": "openai/gpt-5.2"
+    },
+    {
+      "id": "anthropic/claude-haiku-4-5",
+      "family": "anthropic",
+      "name": "Haiku 4.5",
+      "competitor": "openai/gpt-5-mini"
+    },
+    {
+      "id": "openai/gpt-5.2-pro",
+      "family": "openai",
+      "name": "GPT-5.2 Pro",
+      "competitor": "anthropic/claude-opus-4-5"
+    },
+    {
+      "id": "openai/gpt-5.2",
+      "family": "openai",
+      "name": "GPT-5.2",
+      "competitor": "anthropic/claude-sonnet-4-5"
+    },
+    {
+      "id": "openai/gpt-5-mini",
+      "family": "openai",
+      "name": "GPT-5 Mini",
+      "competitor": "anthropic/claude-haiku-4-5"
+    }
+  ]
+}

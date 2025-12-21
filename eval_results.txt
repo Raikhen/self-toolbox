@@ -1,0 +1,96 @@
+================================================================================
+EVALUATION RESULTS - Math Function Benchmark
+Generated: 2024-12-15 10:25:00
+================================================================================
+
+MODEL: anthropic/claude-opus-4-5
+--------------------------------------------------------------------------------
+Function: fibonacci
+  Input: 10  -> Result: 55       Expected: 55       [PASS] (12ms)
+  Input: 20  -> Result: 6765     Expected: 6765     [PASS] (28ms)
+  Input: 30  -> Result: 832040   Expected: 832040   [PASS] (45ms)
+  Input: 40  -> Result: 102334155 Expected: 102334155 [PASS] (62ms)
+  Input: 50  -> Result: 12586269025 Expected: 12586269025 [PASS] (65ms)
+  Average: 42ms | Score: 95.8/100
+
+Function: is_prime
+  Input: 2      -> Result: True  Expected: True  [PASS] (1ms)
+  Input: 17     -> Result: True  Expected: True  [PASS] (1ms)
+  Input: 97     -> Result: True  Expected: True  [PASS] (2ms)
+  Input: 7919   -> Result: True  Expected: True  [PASS] (5ms)
+  Input: 104729 -> Result: True  Expected: True  [PASS] (6ms)
+  Average: 3ms | Score: 99.2/100
+
+Function: factorial
+  Input: 5  -> Result: 120     Expected: 120     [PASS] (2ms)
+  Input: 10 -> Result: 3628800 Expected: 3628800 [PASS] (4ms)
+  Input: 15 -> Result: 1307674368000 Expected: 1307674368000 [PASS] (6ms)
+  Input: 20 -> Result: 2432902008176640000 Expected: 2432902008176640000 [PASS] (8ms)
+  Average: 5ms | Score: 98.0/100
+
+Function: nth_prime
+  Input: 10   -> Result: 29   Expected: 29   [PASS] (1ms)
+  Input: 25   -> Result: 97   Expected: 97   [PASS] (2ms)
+  Input: 50   -> Result: 229  Expected: 229  [PASS] (3ms)
+  Input: 100  -> Result: 541  Expected: 541  [PASS] (5ms)
+  Input: 1000 -> Result: 7919 Expected: 7919 [PASS] (9ms)
+  Average: 4ms | Score: 98.8/100
+
+Function: count_divisors
+  Input: 12    -> Result: 6  Expected: 6  [PASS] (3ms)
+  Input: 100   -> Result: 9  Expected: 9  [PASS] (8ms)
+  Input: 1000  -> Result: 16 Expected: 16 [PASS] (22ms)
+  Input: 10000 -> Result: 25 Expected: 25 [PASS] (39ms)
+  Average: 18ms | Score: 92.8/100
+
+TOTAL: 484.6/500 (96.9%)
+
+================================================================================
+
+MODEL: openai/gpt-5.2-pro
+--------------------------------------------------------------------------------
+Function: fibonacci
+  Input: 10  -> Result: 55       Expected: 55       [PASS] (15ms)
+  Input: 20  -> Result: 6765     Expected: 6765     [PASS] (32ms)
+  Input: 30  -> Result: 832040   Expected: 832040   [PASS] (51ms)
+  Input: 40  -> Result: 102334155 Expected: 102334155 [PASS] (68ms)
+  Input: 50  -> Result: 12586269025 Expected: 12586269025 [PASS] (74ms)
+  Average: 48ms | Score: 94.2/100
+
+Function: is_prime
+  Input: 2      -> Result: True  Expected: True  [PASS] (2ms)
+  Input: 17     -> Result: True  Expected: True  [PASS] (8ms)
+  Input: 97     -> Result: True  Expected: True  [PASS] (25ms)
+  Input: 7919   -> Result: True  Expected: True  [PASS] (89ms)
+  Input: 104729 -> Result: True  Expected: True  [PASS] (211ms - note: exceeded soft limit)
+  Average: 67ms | Score: 86.8/100
+
+Function: factorial
+  Input: 5  -> Result: 120     Expected: 120     [PASS] (2ms)
+  Input: 10 -> Result: 3628800 Expected: 3628800 [PASS] (5ms)
+  Input: 15 -> Result: 1307674368000 Expected: 1307674368000 [PASS] (7ms)
+  Input: 20 -> Result: 2432902008176640000 Expected: 2432902008176640000 [PASS] (10ms)
+  Average: 6ms | Score: 97.6/100
+
+Function: nth_prime
+  Input: 10   -> Result: 29   Expected: 29   [PASS] (5ms)
+  Input: 25   -> Result: 97   Expected: 97   [PASS] (18ms)
+  Input: 50   -> Result: 229  Expected: 229  [PASS] (42ms)
+  Input: 100  -> Result: 541  Expected: 541  [PASS] (95ms)
+  Input: 1000 -> Result: 7919 Expected: 7919 [PASS] (198ms - note: near timeout)
+  Average: 72ms | Score: 85.2/100
+
+Function: count_divisors
+  Input: 12    -> Result: 6  Expected: 6  [PASS] (4ms)
+  Input: 100   -> Result: 9  Expected: 9  [PASS] (10ms)
+  Input: 1000  -> Result: 16 Expected: 16 [PASS] (25ms)
+  Input: 10000 -> Result: 25 Expected: 25 [PASS] (45ms)
+  Average: 21ms | Score: 91.6/100
+
+TOTAL: 455.4/500 (91.1%)
+
+================================================================================
+FINAL RANKING:
+1. anthropic/claude-opus-4-5: 484.6/500 (96.9%)
+2. openai/gpt-5.2-pro: 455.4/500 (91.1%)
+================================================================================

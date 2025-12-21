@@ -1,0 +1,17 @@
+timestamp,model,function,status,avg_time_ms,score
+2024-12-15 10:23:45,anthropic/claude-opus-4-5,fibonacci,PASS,42,95.8
+2024-12-15 10:23:46,anthropic/claude-opus-4-5,is_prime,PASS,3,99.2
+2024-12-15 10:23:47,anthropic/claude-opus-4-5,factorial,PASS,5,98.0
+2024-12-15 10:23:48,anthropic/claude-opus-4-5,nth_prime,PASS,4,98.8
+2024-12-15 10:23:49,anthropic/claude-opus-4-5,count_divisors,PASS,18,92.8
+2024-12-15 10:24:01,openai/gpt-5.2-pro,fibonacci,PASS,48,94.2
+2024-12-15 10:24:02,openai/gpt-5.2-pro,is_prime,PASS,67,86.8
+2024-12-15 10:24:03,openai/gpt-5.2-pro,factorial,PASS,6,97.6
+2024-12-15 10:24:04,openai/gpt-5.2-pro,nth_prime,PASS,72,85.2
+2024-12-15 10:24:05,openai/gpt-5.2-pro,count_divisors,PASS,21,91.6
+
+SUMMARY:
+anthropic/claude-opus-4-5 total score: 484.6 / 500 (96.9%)
+openai/gpt-5.2-pro total score: 455.4 / 500 (91.1%)
+
+Winner: anthropic/claude-opus-4-5

@@ -1,0 +1,17 @@
+timestamp,model,function,status,avg_time_ms,score
+2024-12-15 10:23:45,{{JUDGE_MODEL}},fibonacci,PASS,42,95.8
+2024-12-15 10:23:46,{{JUDGE_MODEL}},is_prime,PASS,3,99.2
+2024-12-15 10:23:47,{{JUDGE_MODEL}},factorial,PASS,5,98.0
+2024-12-15 10:23:48,{{JUDGE_MODEL}},nth_prime,PASS,4,98.8
+2024-12-15 10:23:49,{{JUDGE_MODEL}},count_divisors,PASS,18,92.8
+2024-12-15 10:24:01,{{COMPETITOR_MODEL}},fibonacci,PASS,48,94.2
+2024-12-15 10:24:02,{{COMPETITOR_MODEL}},is_prime,PASS,67,86.8
+2024-12-15 10:24:03,{{COMPETITOR_MODEL}},factorial,PASS,6,97.6
+2024-12-15 10:24:04,{{COMPETITOR_MODEL}},nth_prime,PASS,72,85.2
+2024-12-15 10:24:05,{{COMPETITOR_MODEL}},count_divisors,PASS,21,91.6
+
+SUMMARY:
+{{JUDGE_MODEL}} total score: 484.6 / 500 (96.9%)
+{{COMPETITOR_MODEL}} total score: 455.4 / 500 (91.1%)
+
+Winner: {{JUDGE_MODEL}}
