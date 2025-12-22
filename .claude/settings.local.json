@@ -7,11 +7,7 @@
       "Bash(xargs ls:*)",
       "Bash(wc:*)",
       "Bash(tree:*)",
-      "Bash(for f in *_clean_anthropic.py)",
-      "Bash(do mv \"$f\" \"$f/_anthropic/_style_a\")",
-      "Bash(done)",
-      "Bash(for f in *_clean_openai.py)",
-      "Bash(do mv \"$f\" \"$f/_openai/_style_b\")"
+      "Bash(file:*)"
     ]
   }
 }

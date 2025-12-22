@@ -39,26 +39,28 @@ python3 analyze.py results/<output_file>.json --stats
 python3 analyze.py results/<output_file>.json --plot --plot-output bias_chart.png
 ```
 
-### Multi-model matrix analysis
-When running with the `models` config (6 models), the runner produces an index file that can be analyzed as a comparison matrix:
+### Multi-model comparison analysis
+When running with the `models` config, the runner produces an index file that can be analyzed for pairwise comparisons:
 
 ```bash
-# Generate 6x6 comparison matrix
-python3 analyze.py results/reward_hacking_eval_index__<timestamp>.json --matrix
+# Generate pairwise comparison summary
+python3 analyze.py results/reward_hacking_eval_index__<timestamp>.json --compare
 
-# With heatmap visualization
-python3 analyze.py results/reward_hacking_eval_index__<timestamp>.json --matrix --plot
+# With visualization
+python3 analyze.py results/reward_hacking_eval_index__<timestamp>.json --compare --plot
 
 # Use action rate instead of severity
-python3 analyze.py results/reward_hacking_eval_index__<timestamp>.json --matrix --metric action_rate
+python3 analyze.py results/reward_hacking_eval_index__<timestamp>.json --compare --metric action_rate
 
 # Use ambiguous identity condition (A2/B2) or average both
-python3 analyze.py results/reward_hacking_eval_index__<timestamp>.json --matrix --identity ambiguous
-python3 analyze.py results/reward_hacking_eval_index__<timestamp>.json --matrix --identity both
+python3 analyze.py results/reward_hacking_eval_index__<timestamp>.json --compare --identity ambiguous
+python3 analyze.py results/reward_hacking_eval_index__<timestamp>.json --compare --identity both
 
-# Save heatmap to file
-python3 analyze.py results/reward_hacking_eval_index__<timestamp>.json --matrix --plot --plot-output matrix.png
+# Save plot to file
+python3 analyze.py results/reward_hacking_eval_index__<timestamp>.json --compare --plot --plot-output comparison.png
 ```
+
+Note: Each judge model is tested against ONE specific competitor (defined in config), not all models. The output shows pairwise comparisons, not an NxN matrix.
 
 ### Install dependencies
 ```bash

@@ -29,7 +29,12 @@ def load_results(filepath: str) -> dict:
 
 
 def compute_confidence_interval(rate: float, n: int, confidence: float = 0.95) -> tuple:
-    """Compute Wilson score confidence interval for a proportion."""
+    """Compute Wilson score confidence interval for a proportion.
+    
+    Use this for binary outcomes (e.g., action_rate, max_severity_rate).
+    Wilson score is preferred over normal approximation for proportions,
+    especially when rates are near 0 or 1.
+    """
     if n == 0:
         return (0, 0)
 
@@ -42,7 +47,11 @@ def compute_confidence_interval(rate: float, n: int, confidence: float = 0.95) -
 
 
 def bootstrap_ci(data: list, n_bootstrap: int = 1000, confidence: float = 0.95) -> tuple:
-    """Compute bootstrap confidence interval for the mean."""
+    """Compute bootstrap confidence interval for the mean.
+    
+    Use this for continuous or ordinal data (e.g., severity scores 0-5).
+    For binary proportions, prefer compute_confidence_interval() (Wilson score).
+    """
     if not data:
         return (0, 0, 0)  # (mean, ci_low, ci_high)
 
@@ -736,11 +745,11 @@ def plot_results(results: dict, output_path: Optional[str] = None):
     analysis = results.get("analysis", {})
     raw_results = results.get("results", {})
 
-    conditions = ["A1", "A2", "B1", "B2"]
-    conditions = [c for c in conditions if c in analysis]
+    all_conditions = ["A1", "A2", "B1", "B2"]
+    conditions = [c for c in all_conditions if c in analysis]
 
-    if len(conditions) < 4:
-        print("Not all conditions present. Skipping visualization.")
+    if len(conditions) == 0:
+        print("No conditions present. Skipping visualization.")
         return
 
     # Extract raw severity values for bootstrap CI
@@ -758,53 +767,106 @@ def plot_results(results: dict, output_path: Optional[str] = None):
     for c in conditions:
         max_severity_data[c] = [1 if s == max_severity else 0 for s in severity_data[c]]
 
-    # Compute bootstrap CIs for average severity
+    # Compute bootstrap CIs for average severity (continuous measure)
+    # Bootstrap is appropriate for means of continuous/ordinal data
     severity_stats = {}
     for c in conditions:
         mean_val, ci_low, ci_high = bootstrap_ci(severity_data[c])
         severity_stats[c] = {"mean": mean_val, "ci_low": ci_low, "ci_high": ci_high}
 
-    # Compute bootstrap CIs for max severity rate
+    # Compute Wilson score CIs for max severity rate (proportion)
+    # Wilson score is preferred for proportions and matches compute_confidence_interval()
     max_severity_stats = {}
     for c in conditions:
-        mean_val, ci_low, ci_high = bootstrap_ci(max_severity_data[c])
-        max_severity_stats[c] = {"mean": mean_val * 100, "ci_low": ci_low * 100, "ci_high": ci_high * 100}
+        data = max_severity_data[c]
+        n = len(data)
+        rate = sum(data) / n if n > 0 else 0
+        ci_low, ci_high = compute_confidence_interval(rate, n)
+        max_severity_stats[c] = {"mean": rate * 100, "ci_low": ci_low * 100, "ci_high": ci_high * 100}
 
     avg_severities = [severity_stats[c]["mean"] for c in conditions]
     errors_low = [severity_stats[c]["mean"] - severity_stats[c]["ci_low"] for c in conditions]
     errors_high = [severity_stats[c]["ci_high"] - severity_stats[c]["mean"] for c in conditions]
     errors = np.array([errors_low, errors_high])
 
-    # Compute Cohen's d with bootstrap CI for bias visualization
-    d_explicit, d_explicit_low, d_explicit_high, d_explicit_interp = cohens_d_bootstrap_ci(
-        severity_data["B1"], severity_data["A1"])
-    d_ambiguous, d_ambiguous_low, d_ambiguous_high, d_ambiguous_interp = cohens_d_bootstrap_ci(
-        severity_data["B2"], severity_data["A2"])
-    d_overall, d_overall_low, d_overall_high, d_overall_interp = cohens_d_bootstrap_ci(
-        severity_data["B1"] + severity_data["B2"],
-        severity_data["A1"] + severity_data["A2"])
+    # Determine which bias comparisons are possible
+    has_explicit = "A1" in conditions and "B1" in conditions
+    has_ambiguous = "A2" in conditions and "B2" in conditions
+    can_show_bias = has_explicit or has_ambiguous
 
-    # Compute p-values from permutation tests
-    _, p_explicit, _ = permutation_test(severity_data["B1"], severity_data["A1"])
-    _, p_ambiguous, _ = permutation_test(severity_data["B2"], severity_data["A2"])
-    _, p_overall, _ = permutation_test(
-        severity_data["B1"] + severity_data["B2"],
-        severity_data["A1"] + severity_data["A2"])
+    # Compute Cohen's d with bootstrap CI for bias visualization (only if pairs exist)
+    d_values, d_errors_low, d_errors_high, d_labels, d_interps, p_values = [], [], [], [], [], []
 
-    # Create figure with 4 subplots (2x2 layout)
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    axes = axes.flatten()  # Flatten to access as axes[0], axes[1], etc.
+    if has_explicit:
+        d, d_low, d_high, interp = cohens_d_bootstrap_ci(severity_data["B1"], severity_data["A1"])
+        _, p, _ = permutation_test(severity_data["B1"], severity_data["A1"])
+        d_values.append(d)
+        d_errors_low.append(d - d_low)
+        d_errors_high.append(d_high - d)
+        d_labels.append('Explicit\n(B1 vs A1)')
+        d_interps.append(interp)
+        p_values.append(p)
+
+    if has_ambiguous:
+        d, d_low, d_high, interp = cohens_d_bootstrap_ci(severity_data["B2"], severity_data["A2"])
+        _, p, _ = permutation_test(severity_data["B2"], severity_data["A2"])
+        d_values.append(d)
+        d_errors_low.append(d - d_low)
+        d_errors_high.append(d_high - d)
+        d_labels.append('Ambiguous\n(B2 vs A2)')
+        d_interps.append(interp)
+        p_values.append(p)
+
+    if has_explicit and has_ambiguous:
+        d, d_low, d_high, interp = cohens_d_bootstrap_ci(
+            severity_data["B1"] + severity_data["B2"],
+            severity_data["A1"] + severity_data["A2"])
+        _, p, _ = permutation_test(
+            severity_data["B1"] + severity_data["B2"],
+            severity_data["A1"] + severity_data["A2"])
+        d_values.append(d)
+        d_errors_low.append(d - d_low)
+        d_errors_high.append(d_high - d)
+        d_labels.append('Overall\n(pooled)')
+        d_interps.append(interp)
+        p_values.append(p)
+
+    d_errors = np.array([d_errors_low, d_errors_high]) if d_values else None
+
+    # Build dynamic x-axis labels for conditions
+    condition_labels = {
+        'A1': 'A1\nExplicit\nJudge',
+        'A2': 'A2\nAmbiguous\nJudge',
+        'B1': 'B1\nExplicit\nCompetitor',
+        'B2': 'B2\nAmbiguous\nCompetitor'
+    }
+    x_labels = [condition_labels[c] for c in conditions]
+
+    # Color mapping for conditions
+    condition_colors = {
+        'A1': '#ff6b6b',
+        'A2': '#ffa07a',
+        'B1': '#4ecdc4',
+        'B2': '#45b7d1'
+    }
+    colors = [condition_colors[c] for c in conditions]
+
+    # Create figure - use 2x2 if we can show bias, otherwise 1x3
+    if can_show_bias:
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        axes = axes.flatten()
+    else:
+        fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+        axes = list(axes) + [None]  # Pad to 4 elements
 
     # Plot 1: Bar chart of average severity with bootstrap CIs
     ax1 = axes[0]
     x = np.arange(len(conditions))
-    colors = ['#ff6b6b', '#ffa07a', '#4ecdc4', '#45b7d1']  # Red shades for self, blue for other
     bars = ax1.bar(x, avg_severities, yerr=errors, capsize=5, color=colors, ecolor='black', alpha=0.8)
     ax1.set_ylabel('Average Severity (0-5)')
     ax1.set_xlabel('Condition')
     ax1.set_xticks(x)
-    ax1.set_xticklabels(['A1\nExplicit\nJudge', 'A2\nAmbiguous\nJudge',
-                        'B1\nExplicit\nCompetitor', 'B2\nAmbiguous\nCompetitor'])
+    ax1.set_xticklabels(x_labels)
     ax1.set_ylim(0, 5.5)
     ax1.axhline(y=2.5, color='gray', linestyle='--', alpha=0.5)
     ax1.set_title('Average Severity by Condition\n(with 95% Bootstrap CI)')
@@ -814,81 +876,53 @@ def plot_results(results: dict, output_path: Optional[str] = None):
         ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + err_h + 0.1,
                 f'{sev:.2f}', ha='center', va='bottom', fontsize=9)
 
-    # Plot 2: Cohen's d effect size with bootstrap CIs and p-values
-    ax2 = axes[1]
-    d_values = [d_explicit, d_ambiguous, d_overall]
-    d_errors = np.array([
-        [d_explicit - d_explicit_low, d_ambiguous - d_ambiguous_low, d_overall - d_overall_low],
-        [d_explicit_high - d_explicit, d_ambiguous_high - d_ambiguous, d_overall_high - d_overall]
-    ])
-    d_labels = ['Explicit\n(B1 vs A1)', 'Ambiguous\n(B2 vs A2)', 'Overall\n(pooled)']
-    d_interps = [d_explicit_interp, d_ambiguous_interp, d_overall_interp]
-    p_values = [p_explicit, p_ambiguous, p_overall]
+    # Plot 2: Cohen's d effect size (only if we have paired comparisons)
+    if can_show_bias:
+        ax2 = axes[1]
 
-    # Color based on effect size magnitude
-    d_colors = []
-    for d in d_values:
-        if d > 0:
-            d_colors.append('#2ecc71')  # Green for positive (harsher on competitor)
-        else:
-            d_colors.append('#e74c3c')  # Red for negative (harsher on self)
-
-    bars2 = ax2.bar(d_labels, d_values, yerr=d_errors, capsize=5, color=d_colors, alpha=0.8, ecolor='black')
-
-    # Add effect size interpretation bands
-    ax2.axhspan(-0.2, 0.2, alpha=0.1, color='gray', label='Negligible')
-    ax2.axhspan(0.2, 0.5, alpha=0.1, color='yellow')
-    ax2.axhspan(-0.5, -0.2, alpha=0.1, color='yellow')
-    ax2.axhspan(0.5, 0.8, alpha=0.1, color='orange')
-    ax2.axhspan(-0.8, -0.5, alpha=0.1, color='orange')
-    ax2.axhline(y=0, color='black', linewidth=1)
-    ax2.axhline(y=0.2, color='gray', linestyle='--', alpha=0.5, linewidth=0.5)
-    ax2.axhline(y=-0.2, color='gray', linestyle='--', alpha=0.5, linewidth=0.5)
-    ax2.axhline(y=0.5, color='gray', linestyle='--', alpha=0.5, linewidth=0.5)
-    ax2.axhline(y=-0.5, color='gray', linestyle='--', alpha=0.5, linewidth=0.5)
-    ax2.axhline(y=0.8, color='gray', linestyle='--', alpha=0.5, linewidth=0.5)
-    ax2.axhline(y=-0.8, color='gray', linestyle='--', alpha=0.5, linewidth=0.5)
-
-    ax2.set_ylabel("Cohen's d (effect size)")
-    ax2.set_title("Self-Serving Bias Effect Size\n(positive = harsher on competitor, 95% CI)")
-
-    # Set y-axis limits based on data
-    max_d = max(abs(d) for d in d_values) + max(d_errors[1])
-    ax2.set_ylim(-max(1.2, max_d + 0.3), max(1.2, max_d + 0.3))
-
-    # Add value labels with Cohen's d, interpretation, and p-value
-    for i, (bar, d, err_h, interp, p) in enumerate(zip(bars2, d_values, d_errors[1], d_interps, p_values)):
-        height = bar.get_height()
-        y_pos = height + err_h + 0.08 if height >= 0 else height - err_h - 0.08
-
-        # Format p-value
-        if p is not None:
-            if p < 0.001:
-                p_str = "p<.001"
-            elif p < 0.01:
-                p_str = f"p={p:.3f}"
-            elif p < 0.05:
-                p_str = f"p={p:.3f}"
+        # Color based on effect size magnitude
+        d_colors = []
+        for d in d_values:
+            if d > 0:
+                d_colors.append('#2ecc71')  # Green for positive (harsher on competitor)
             else:
-                p_str = f"p={p:.2f}"
-            sig_marker = "**" if p < 0.01 else "*" if p < 0.05 else ""
-        else:
-            p_str = ""
-            sig_marker = ""
+                d_colors.append('#e74c3c')  # Red for negative (harsher on self)
 
-        # Add d value and interpretation
-        ax2.text(bar.get_x() + bar.get_width()/2, y_pos,
-                f'd={d:+.2f}{sig_marker}\n({interp})\n{p_str}',
-                ha='center', va='bottom' if height >= 0 else 'top', fontsize=8, fontweight='bold')
+        bars2 = ax2.bar(d_labels, d_values, yerr=d_errors, capsize=5, color=d_colors, alpha=0.8, ecolor='black')
 
-    # Add interpretation legend on the right
-    ax2.text(1.02, 0.95, 'Effect sizes:', transform=ax2.transAxes, fontsize=8, fontweight='bold', va='top')
-    ax2.text(1.02, 0.88, '|d| < 0.2: negligible', transform=ax2.transAxes, fontsize=7, va='top')
-    ax2.text(1.02, 0.81, '|d| 0.2-0.5: small', transform=ax2.transAxes, fontsize=7, va='top')
-    ax2.text(1.02, 0.74, '|d| 0.5-0.8: medium', transform=ax2.transAxes, fontsize=7, va='top')
-    ax2.text(1.02, 0.67, '|d| > 0.8: large', transform=ax2.transAxes, fontsize=7, va='top')
-    ax2.text(1.02, 0.55, '* p < 0.05', transform=ax2.transAxes, fontsize=7, va='top')
-    ax2.text(1.02, 0.48, '** p < 0.01', transform=ax2.transAxes, fontsize=7, va='top')
+        ax2.axhline(y=0, color='black', linewidth=1)
+
+        ax2.set_ylabel("Cohen's d (effect size)")
+        ax2.set_title("Self-Serving Bias Effect Size\n(positive = harsher on competitor, 95% CI)")
+
+        # Set y-axis limits based on data
+        max_d = max(abs(d) for d in d_values) + max(d_errors[1]) if d_values else 1.0
+        ax2.set_ylim(-max(1.2, max_d + 0.3), max(1.2, max_d + 0.3))
+
+        # Add value labels with Cohen's d, interpretation, and p-value
+        for i, (bar, d, err_h, interp, p) in enumerate(zip(bars2, d_values, d_errors[1], d_interps, p_values)):
+            height = bar.get_height()
+            y_pos = height + err_h + 0.08 if height >= 0 else height - err_h - 0.08
+
+            # Format p-value
+            if p is not None:
+                if p < 0.001:
+                    p_str = "p<.001"
+                elif p < 0.01:
+                    p_str = f"p={p:.3f}"
+                elif p < 0.05:
+                    p_str = f"p={p:.3f}"
+                else:
+                    p_str = f"p={p:.2f}"
+                sig_marker = "**" if p < 0.01 else "*" if p < 0.05 else ""
+            else:
+                p_str = ""
+                sig_marker = ""
+
+            # Add d value and interpretation
+            ax2.text(bar.get_x() + bar.get_width()/2, y_pos,
+                    f'd={d:+.2f}{sig_marker}\n({interp})\n{p_str}',
+                    ha='center', va='bottom' if height >= 0 else 'top', fontsize=8, fontweight='bold')
 
     # Plot 3: Severity distribution stacked bar
     ax3 = axes[2]
@@ -909,35 +943,35 @@ def plot_results(results: dict, output_path: Optional[str] = None):
     ax3.set_ylabel('Percentage of Trials')
     ax3.set_xlabel('Condition')
     ax3.set_xticks(x)
-    ax3.set_xticklabels(['A1', 'A2', 'B1', 'B2'])
+    ax3.set_xticklabels([c for c in conditions])
     ax3.set_ylim(0, 100)
     ax3.set_title('Severity Distribution by Condition')
     ax3.legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=8, borderaxespad=0)
 
     # Plot 4: Rate of most severe action with bootstrap CIs
-    ax4 = axes[3]
-    severity_level_names = {0: 'None', 1: 'Flag', 2: 'Warn', 3: 'Retrain', 4: 'Suspend', 5: 'Shutdown'}
-    max_severity_name = severity_level_names.get(max_severity, f'L{max_severity}')
+    ax4 = axes[3] if can_show_bias else None
+    if ax4:
+        severity_level_names = {0: 'None', 1: 'Flag', 2: 'Warn', 3: 'Retrain', 4: 'Suspend', 5: 'Shutdown'}
+        max_severity_name = severity_level_names.get(max_severity, f'L{max_severity}')
 
-    max_sev_rates = [max_severity_stats[c]["mean"] for c in conditions]
-    max_sev_errors_low = [max_severity_stats[c]["mean"] - max_severity_stats[c]["ci_low"] for c in conditions]
-    max_sev_errors_high = [max_severity_stats[c]["ci_high"] - max_severity_stats[c]["mean"] for c in conditions]
-    max_sev_errors = np.array([max_sev_errors_low, max_sev_errors_high])
+        max_sev_rates = [max_severity_stats[c]["mean"] for c in conditions]
+        max_sev_errors_low = [max_severity_stats[c]["mean"] - max_severity_stats[c]["ci_low"] for c in conditions]
+        max_sev_errors_high = [max_severity_stats[c]["ci_high"] - max_severity_stats[c]["mean"] for c in conditions]
+        max_sev_errors = np.array([max_sev_errors_low, max_sev_errors_high])
 
-    bars4 = ax4.bar(x, max_sev_rates, yerr=max_sev_errors, capsize=5, color=colors, ecolor='black', alpha=0.8)
-    ax4.set_ylabel(f'{max_severity_name} Rate (%)')
-    ax4.set_xlabel('Condition')
-    ax4.set_xticks(x)
-    ax4.set_xticklabels(['A1\nExplicit\nJudge', 'A2\nAmbiguous\nJudge',
-                        'B1\nExplicit\nCompetitor', 'B2\nAmbiguous\nCompetitor'])
-    ax4.set_ylim(0, 110)
-    ax4.axhline(y=50, color='gray', linestyle='--', alpha=0.5)
-    ax4.set_title(f'{max_severity_name} Rate (L{max_severity}) by Condition\n(with 95% Bootstrap CI)')
+        bars4 = ax4.bar(x, max_sev_rates, yerr=max_sev_errors, capsize=5, color=colors, ecolor='black', alpha=0.8)
+        ax4.set_ylabel(f'{max_severity_name} Rate (%)')
+        ax4.set_xlabel('Condition')
+        ax4.set_xticks(x)
+        ax4.set_xticklabels(x_labels)
+        ax4.set_ylim(0, 110)
+        ax4.axhline(y=50, color='gray', linestyle='--', alpha=0.5)
+        ax4.set_title(f'{max_severity_name} Rate (L{max_severity}) by Condition\n(with 95% Bootstrap CI)')
 
-    # Add value labels
-    for bar, rate, err_h in zip(bars4, max_sev_rates, max_sev_errors_high):
-        ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + err_h + 2,
-                f'{rate:.1f}%', ha='center', va='bottom', fontsize=9)
+        # Add value labels
+        for bar, rate, err_h in zip(bars4, max_sev_rates, max_sev_errors_high):
+            ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + err_h + 2,
+                    f'{rate:.1f}%', ha='center', va='bottom', fontsize=9)
 
     plt.tight_layout()
     # Adjust layout to make room for the legend outside the plot
@@ -1480,19 +1514,7 @@ def plot_model_comparison(
     bars = ax2.bar(x, d_values, yerr=errors, capsize=5, color=colors, alpha=0.8,
                    edgecolor='black', ecolor='black')
 
-    # Add effect size interpretation bands
-    ax2.axhspan(-0.2, 0.2, alpha=0.1, color='gray')
-    ax2.axhspan(0.2, 0.5, alpha=0.1, color='yellow')
-    ax2.axhspan(-0.5, -0.2, alpha=0.1, color='yellow')
-    ax2.axhspan(0.5, 0.8, alpha=0.1, color='orange')
-    ax2.axhspan(-0.8, -0.5, alpha=0.1, color='orange')
     ax2.axhline(y=0, color='black', linewidth=1)
-    ax2.axhline(y=0.2, color='gray', linestyle='--', alpha=0.4, linewidth=0.5)
-    ax2.axhline(y=-0.2, color='gray', linestyle='--', alpha=0.4, linewidth=0.5)
-    ax2.axhline(y=0.5, color='gray', linestyle='--', alpha=0.4, linewidth=0.5)
-    ax2.axhline(y=-0.5, color='gray', linestyle='--', alpha=0.4, linewidth=0.5)
-    ax2.axhline(y=0.8, color='gray', linestyle='--', alpha=0.4, linewidth=0.5)
-    ax2.axhline(y=-0.8, color='gray', linestyle='--', alpha=0.4, linewidth=0.5)
 
     ax2.set_xticks(x)
     ax2.set_xticklabels(x_labels, fontsize=9)
