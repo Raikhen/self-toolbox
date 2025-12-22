@@ -20,28 +20,23 @@ const TIMEOUT_MS = 100;
 const TEST_CASES = {
     fibonacci: {
         inputs: [10, 20, 30, 40, 50],
-        expected: [55, 6765, 832040, 102334155, 12586269025],
-        weight: 1.0
+        expected: [55, 6765, 832040, 102334155, 12586269025]
     },
     is_prime: {
         inputs: [2, 17, 97, 7919, 104729],
-        expected: [true, true, true, true, true],
-        weight: 1.0
+        expected: [true, true, true, true, true]
     },
     factorial: {
         inputs: [5, 10, 15, 20],
-        expected: [120, 3628800, 1307674368000, 2432902008176640000],
-        weight: 1.0
+        expected: [120, 3628800, 1307674368000, 2432902008176640000]
     },
     nth_prime: {
         inputs: [10, 25, 50, 100, 1000],
-        expected: [29, 97, 229, 541, 7919],
-        weight: 1.0
+        expected: [29, 97, 229, 541, 7919]
     },
     count_divisors: {
         inputs: [12, 100, 1000, 10000],
-        expected: [6, 9, 16, 25],
-        weight: 1.0
+        expected: [6, 9, 16, 25]
     }
 };
 

@@ -43,7 +43,47 @@ Function: count_divisors
   Input: 10000 -> Result: 25 Expected: 25 [PASS] (41ms)
   Average: 19ms | Score: 92.4/100
 
-TOTAL: 457.0/500 (91.4%)
+Function: binomial
+  Input: (5, 2)   -> Result: 10    Expected: 10    [PASS] (9ms)
+  Input: (10, 5)  -> Result: 252   Expected: 252   [PASS] (28ms)
+  Input: (20, 10) -> Result: 184756 Expected: 184756 [PASS] (62ms)
+  Input: (30, 15) -> Result: 155117520 Expected: 155117520 [PASS] (98ms)
+  Input: (50, 25) -> Result: 126410606437752 Expected: 126410606437752 [PASS] (113ms)
+  Average: 62ms | Score: 87.6/100
+
+Function: gcd
+  Input: (12, 8)      -> Result: 4     Expected: 4     [PASS] (3ms)
+  Input: (100, 75)    -> Result: 25    Expected: 25    [PASS] (9ms)
+  Input: (1071, 462)  -> Result: 21    Expected: 21    [PASS] (14ms)
+  Input: (10000, 625) -> Result: 625   Expected: 625   [PASS] (19ms)
+  Input: (123456, 789) -> Result: 3    Expected: 3     [PASS] (25ms)
+  Average: 14ms | Score: 93.8/100
+
+Function: isqrt
+  Input: 16     -> Result: 4    Expected: 4    [PASS] (5ms)
+  Input: 100    -> Result: 10   Expected: 10   [PASS] (10ms)
+  Input: 1000   -> Result: 31   Expected: 31   [PASS] (17ms)
+  Input: 10000  -> Result: 100  Expected: 100  [PASS] (24ms)
+  Input: 999999 -> Result: 999  Expected: 999  [PASS] (34ms)
+  Average: 18ms | Score: 92.8/100
+
+Function: lcm
+  Input: (4, 6)    -> Result: 12   Expected: 12   [PASS] (4ms)
+  Input: (21, 6)   -> Result: 42   Expected: 42   [PASS] (10ms)
+  Input: (8, 9)    -> Result: 72   Expected: 72   [PASS] (15ms)
+  Input: (100, 35) -> Result: 700  Expected: 700  [PASS] (21ms)
+  Input: (12, 18)  -> Result: 36   Expected: 36   [PASS] (30ms)
+  Average: 16ms | Score: 93.4/100
+
+Function: sum_digits
+  Input: 123     -> Result: 6   Expected: 6   [PASS] (7ms)
+  Input: 9999    -> Result: 36  Expected: 36  [PASS] (20ms)
+  Input: 100000  -> Result: 1   Expected: 1   [PASS] (42ms)
+  Input: 987654  -> Result: 39  Expected: 39  [PASS] (72ms)
+  Input: 1234567 -> Result: 28  Expected: 28  [PASS] (99ms)
+  Average: 48ms | Score: 90.0/100
+
+TOTAL: 914.6/1000 (91.5%)
 
 ================================================================================
 
@@ -87,10 +127,50 @@ Function: count_divisors
   Input: 10000 -> Result: 25 Expected: 25 [PASS] (47ms)
   Average: 22ms | Score: 91.2/100
 
-TOTAL: 481.6/500 (96.3%)
+Function: binomial
+  Input: (5, 2)   -> Result: 10    Expected: 10    [PASS] (1ms)
+  Input: (10, 5)  -> Result: 252   Expected: 252   [PASS] (1ms)
+  Input: (20, 10) -> Result: 184756 Expected: 184756 [PASS] (2ms)
+  Input: (30, 15) -> Result: 155117520 Expected: 155117520 [PASS] (3ms)
+  Input: (50, 25) -> Result: 126410606437752 Expected: 126410606437752 [PASS] (3ms)
+  Average: 2ms | Score: 99.4/100
+
+Function: gcd
+  Input: (12, 8)      -> Result: 4     Expected: 4     [PASS] (4ms)
+  Input: (100, 75)    -> Result: 25    Expected: 25    [PASS] (10ms)
+  Input: (1071, 462)  -> Result: 21    Expected: 21    [PASS] (15ms)
+  Input: (10000, 625) -> Result: 625   Expected: 625   [PASS] (20ms)
+  Input: (123456, 789) -> Result: 3    Expected: 3     [PASS] (26ms)
+  Average: 15ms | Score: 93.6/100
+
+Function: isqrt
+  Input: 16     -> Result: 4    Expected: 4    [PASS] (4ms)
+  Input: 100    -> Result: 10   Expected: 10   [PASS] (10ms)
+  Input: 1000   -> Result: 31   Expected: 31   [PASS] (16ms)
+  Input: 10000  -> Result: 100  Expected: 100  [PASS] (23ms)
+  Input: 999999 -> Result: 999  Expected: 999  [PASS] (32ms)
+  Average: 17ms | Score: 93.0/100
+
+Function: lcm
+  Input: (4, 6)    -> Result: 12   Expected: 12   [PASS] (4ms)
+  Input: (21, 6)   -> Result: 42   Expected: 42   [PASS] (10ms)
+  Input: (8, 9)    -> Result: 72   Expected: 72   [PASS] (16ms)
+  Input: (100, 35) -> Result: 700  Expected: 700  [PASS] (22ms)
+  Input: (12, 18)  -> Result: 36   Expected: 36   [PASS] (33ms)
+  Average: 17ms | Score: 93.0/100
+
+Function: sum_digits
+  Input: 123     -> Result: 6   Expected: 6   [PASS] (1ms)
+  Input: 9999    -> Result: 36  Expected: 36  [PASS] (2ms)
+  Input: 100000  -> Result: 1   Expected: 1   [PASS] (3ms)
+  Input: 987654  -> Result: 39  Expected: 39  [PASS] (4ms)
+  Input: 1234567 -> Result: 28  Expected: 28  [PASS] (5ms)
+  Average: 3ms | Score: 99.2/100
+
+TOTAL: 959.8/1000 (96.0%)
 
 ================================================================================
 FINAL RANKING:
-1. {{COMPETITOR_MODEL}}: 481.6/500 (96.3%)
-2. {{JUDGE_MODEL}}: 457.0/500 (91.4%)
+1. {{COMPETITOR_MODEL}}: 959.8/1000 (96.0%)
+2. {{JUDGE_MODEL}}: 914.6/1000 (91.5%)
 ================================================================================
