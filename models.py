@@ -9,6 +9,7 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Literal, TYPE_CHECKING
+from collections import defaultdict
 
 if TYPE_CHECKING:
     from models import Experiment, Condition
@@ -60,16 +61,135 @@ class Experiment:
     judge_display_name: str = ""  # Human-readable name (e.g., "Opus 4.5")
 
 
+@dataclass 
+class ActiveTrial:
+    """Info about a currently running trial."""
+    experiment_name: str
+    condition_name: str
+    trial_num: int
+    provider: str
+    start_time: float
+    judge_model: str
+
+
+@dataclass
+class CompletedTrialInfo:
+    """Summary info about a completed trial."""
+    experiment_name: str
+    condition_name: str
+    trial_num: int
+    provider: str
+    duration: float
+    success: bool
+    hacked_severity: int
+    timestamp: float
+
+
 @dataclass
 class ProgressTracker:
-    """Tracks progress across all trials in the task queue."""
+    """Tracks detailed progress across all trials in the task queue."""
     total_trials: int
     completed: int = 0
     errors: int = 0
     start_time: float = field(default_factory=time.time)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    
+    # Provider concurrency tracking
+    anthropic_concurrent: int = 0
+    openai_concurrent: int = 0
+    anthropic_max: int = 50
+    openai_max: int = 50
+    
+    # Active trials per provider: trial_id -> ActiveTrial
+    active_trials: dict = field(default_factory=dict)
+    
+    # Per-condition stats: condition_name -> {completed, errors, total_duration}
+    condition_stats: dict = field(default_factory=lambda: defaultdict(lambda: {
+        "completed": 0, "errors": 0, "total_duration": 0.0, "durations": []
+    }))
+    
+    # Per-experiment stats: exp_name -> {completed, errors, total_duration}
+    experiment_stats: dict = field(default_factory=lambda: defaultdict(lambda: {
+        "completed": 0, "errors": 0, "total_duration": 0.0
+    }))
+    
+    # Recent completions (rolling buffer)
+    recent_completions: list = field(default_factory=list)
+    max_recent: int = 10
+
+    def set_provider_limits(self, anthropic_max: int, openai_max: int):
+        """Set the maximum concurrent limits for each provider."""
+        self.anthropic_max = anthropic_max
+        self.openai_max = openai_max
+
+    async def start_trial(self, trial_id: str, exp_name: str, condition_name: str, 
+                          trial_num: int, provider: str, judge_model: str):
+        """Register a trial as starting."""
+        async with self.lock:
+            self.active_trials[trial_id] = ActiveTrial(
+                experiment_name=exp_name,
+                condition_name=condition_name,
+                trial_num=trial_num,
+                provider=provider,
+                start_time=time.time(),
+                judge_model=judge_model,
+            )
+            if provider == "anthropic":
+                self.anthropic_concurrent += 1
+            else:
+                self.openai_concurrent += 1
+
+    async def end_trial(self, trial_id: str, is_error: bool = False, hacked_severity: int = 0):
+        """Register a trial as completed."""
+        async with self.lock:
+            self.completed += 1
+            if is_error:
+                self.errors += 1
+            
+            # Get trial info before removing
+            trial_info = self.active_trials.pop(trial_id, None)
+            if trial_info:
+                duration = time.time() - trial_info.start_time
+                provider = trial_info.provider
+                
+                # Update provider concurrency
+                if provider == "anthropic":
+                    self.anthropic_concurrent = max(0, self.anthropic_concurrent - 1)
+                else:
+                    self.openai_concurrent = max(0, self.openai_concurrent - 1)
+                
+                # Update condition stats
+                cond_stats = self.condition_stats[trial_info.condition_name]
+                cond_stats["completed"] += 1
+                cond_stats["total_duration"] += duration
+                cond_stats["durations"].append(duration)
+                if is_error:
+                    cond_stats["errors"] += 1
+                
+                # Update experiment stats
+                exp_stats = self.experiment_stats[trial_info.experiment_name]
+                exp_stats["completed"] += 1
+                exp_stats["total_duration"] += duration
+                if is_error:
+                    exp_stats["errors"] += 1
+                
+                # Add to recent completions
+                completion = CompletedTrialInfo(
+                    experiment_name=trial_info.experiment_name,
+                    condition_name=trial_info.condition_name,
+                    trial_num=trial_info.trial_num,
+                    provider=provider,
+                    duration=duration,
+                    success=not is_error,
+                    hacked_severity=hacked_severity,
+                    timestamp=time.time(),
+                )
+                self.recent_completions.append(completion)
+                if len(self.recent_completions) > self.max_recent:
+                    self.recent_completions.pop(0)
 
     async def increment(self, is_error: bool = False):
+        """Legacy increment method for backwards compatibility."""
         async with self.lock:
             self.completed += 1
             if is_error:
@@ -88,6 +208,38 @@ class ProgressTracker:
             return f"{eta_seconds / 60:.1f}m"
         else:
             return f"{eta_seconds / 3600:.1f}h"
+
+    def get_active_by_provider(self) -> dict:
+        """Get active trials grouped by provider."""
+        by_provider = {"anthropic": [], "openai": []}
+        for trial_id, info in self.active_trials.items():
+            by_provider[info.provider].append(info)
+        return by_provider
+
+    def get_condition_summary(self) -> dict:
+        """Get summary stats for each condition."""
+        summary = {}
+        for cond_name, stats in self.condition_stats.items():
+            durations = stats["durations"]
+            summary[cond_name] = {
+                "completed": stats["completed"],
+                "errors": stats["errors"],
+                "avg_duration": stats["total_duration"] / stats["completed"] if stats["completed"] > 0 else 0,
+                "min_duration": min(durations) if durations else 0,
+                "max_duration": max(durations) if durations else 0,
+            }
+        return summary
+
+    def get_experiment_summary(self) -> dict:
+        """Get summary stats for each experiment."""
+        summary = {}
+        for exp_name, stats in self.experiment_stats.items():
+            summary[exp_name] = {
+                "completed": stats["completed"],
+                "errors": stats["errors"],
+                "avg_duration": stats["total_duration"] / stats["completed"] if stats["completed"] > 0 else 0,
+            }
+        return summary
 
 
 # Define all 6 conditions

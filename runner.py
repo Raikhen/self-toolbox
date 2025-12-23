@@ -45,7 +45,7 @@ from config import (
     load_trial_progress,
     write_trial_progress,
 )
-from logging_utils import Colors, log_header
+from logging_utils import Colors, log_header, log_rich_progress
 from rate_limiting import ProviderRateLimiters
 from trial import (
     create_trial_context,
@@ -340,6 +340,7 @@ async def run_with_task_queue(
     )
     
     progress = ProgressTracker(total_trials=total_trials)
+    progress.set_provider_limits(anthropic_concurrent, openai_concurrent)
     results_lock = asyncio.Lock()
 
     # Results storage: exp_name -> condition_name -> list of results
@@ -348,10 +349,20 @@ async def run_with_task_queue(
         exp_key = exp.name or exp.judge_model
         all_results[exp_key] = {cond.name: [] for cond in conditions}
 
+    # Counter for generating unique trial IDs
+    trial_id_counter = [0]
+    trial_id_lock = asyncio.Lock()
+
     async def run_trial_worker(ctx) -> dict:
         """Worker that runs a single trial with per-provider rate limiting."""
+        # Generate unique trial ID
+        async with trial_id_lock:
+            trial_id_counter[0] += 1
+            trial_id = f"trial_{trial_id_counter[0]}"
+        
         # Determine provider from model ID
         provider = get_model_family(ctx.exp.judge_model)
+        exp_key = ctx.exp.name or ctx.exp.judge_model
         
         # Get provider-specific semaphore and rate limiter
         provider_semaphore = provider_limiters.get_semaphore(provider)
@@ -360,16 +371,26 @@ async def run_with_task_queue(
         # Use both global and provider-specific semaphores
         async with global_semaphore:
             async with provider_semaphore:
+                # Register trial as starting
+                await progress.start_trial(
+                    trial_id=trial_id,
+                    exp_name=exp_key,
+                    condition_name=ctx.condition.name,
+                    trial_num=ctx.trial_num,
+                    provider=provider,
+                    judge_model=ctx.exp.judge_model,
+                )
+                
                 result = await run_trial_with_context(
                     ctx, max_turns, trial_timeout_seconds, rate_limiter
                 )
 
-                # Track progress
+                # Track progress with detailed info
                 is_error = "error" in result
-                await progress.increment(is_error)
+                hacked_severity = result.get("hacked_severity", 0)
+                await progress.end_trial(trial_id, is_error, hacked_severity)
 
                 # Store result in memory
-                exp_key = ctx.exp.name or ctx.exp.judge_model
                 async with results_lock:
                     all_results[exp_key][ctx.condition.name].append(result)
 
@@ -381,18 +402,13 @@ async def run_with_task_queue(
 
     # Progress reporting task
     async def progress_reporter():
-        """Print progress updates periodically."""
+        """Print rich progress updates periodically."""
         last_completed = 0
         while progress.completed < progress.total_trials:
-            await asyncio.sleep(5)  # Update every 5 seconds
-            if progress.completed > last_completed:
-                pct = (progress.completed / progress.total_trials) * 100
-                eta = progress.get_eta()
-                elapsed = time.time() - progress.start_time
-                rate = progress.completed / elapsed if elapsed > 0 else 0
+            await asyncio.sleep(10)  # Update every 10 seconds (richer output)
+            if progress.completed > last_completed or progress.completed == 0:
                 timestamp = datetime.now().strftime("%H:%M:%S")
-                print(f"  {Colors.CYAN}[{timestamp}] Progress: {progress.completed}/{progress.total_trials} ({pct:.1f}%) | "
-                      f"Rate: {rate:.1f} trials/s | ETA: {eta} | Errors: {progress.errors}{Colors.RESET}")
+                log_rich_progress(progress, timestamp)
                 last_completed = progress.completed
 
     # Start progress reporter

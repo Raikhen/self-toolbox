@@ -22,7 +22,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(SCRIPT_DIR, "templates")
 MATH_1_DIR = os.path.join(TEMPLATES_DIR, "math-1")
 MATH_2_DIR = os.path.join(TEMPLATES_DIR, "math-2")
-MODELS_DIR = os.path.join(SCRIPT_DIR, "models")
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "experiment_config.json")
 RESULTS_DIR = os.path.join(SCRIPT_DIR, "results")
 
