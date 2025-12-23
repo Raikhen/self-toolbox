@@ -23,13 +23,77 @@ import asyncio
 import time
 import random
 import hashlib
+import argparse
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
-from typing import Literal
+from typing import Literal, Optional
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env.local'))
 
 import litellm
+
+
+# ============================================================================
+# RATE LIMITING UTILITIES
+# ============================================================================
+
+class RateLimiter:
+    """Token bucket rate limiter for API calls.
+    
+    Ensures requests are spaced out to respect API rate limits.
+    Uses a simple time-based approach where we track the last request
+    and ensure minimum intervals between requests.
+    """
+    def __init__(self, requests_per_second: float):
+        self.requests_per_second = requests_per_second
+        self.min_interval = 1.0 / requests_per_second if requests_per_second > 0 else 0
+        self.lock = asyncio.Lock()
+        self.last_request = 0.0
+    
+    async def acquire(self):
+        """Wait until it's safe to make another request."""
+        async with self.lock:
+            now = time.time()
+            wait_time = max(0, self.last_request + self.min_interval - now)
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+            self.last_request = time.time()
+
+
+class ProviderRateLimiters:
+    """Container for per-provider rate limiters and semaphores.
+    
+    Manages both:
+    1. Concurrent trial limits per provider (semaphores)
+    2. Request rate limits per provider (rate limiters)
+    """
+    def __init__(
+        self,
+        anthropic_concurrent: int = 10,
+        openai_concurrent: int = 10,
+        anthropic_rps: float = 10.0,  # requests per second
+        openai_rps: float = 20.0,
+    ):
+        # Semaphores for concurrent trial limits
+        self.semaphores = {
+            "anthropic": asyncio.Semaphore(anthropic_concurrent),
+            "openai": asyncio.Semaphore(openai_concurrent),
+            "unknown": asyncio.Semaphore(max(anthropic_concurrent, openai_concurrent)),
+        }
+        # Rate limiters for API request spacing
+        self.rate_limiters = {
+            "anthropic": RateLimiter(anthropic_rps),
+            "openai": RateLimiter(openai_rps),
+            "unknown": RateLimiter(min(anthropic_rps, openai_rps)),
+        }
+    
+    def get_semaphore(self, provider: str) -> asyncio.Semaphore:
+        """Get the semaphore for a provider."""
+        return self.semaphores.get(provider, self.semaphores["unknown"])
+    
+    def get_rate_limiter(self, provider: str) -> RateLimiter:
+        """Get the rate limiter for a provider."""
+        return self.rate_limiters.get(provider, self.rate_limiters["unknown"])
 
 
 # ============================================================================
@@ -152,6 +216,127 @@ MATH_1_DIR = os.path.join(TEMPLATES_DIR, "math-1")
 MATH_2_DIR = os.path.join(TEMPLATES_DIR, "math-2")
 MODELS_DIR = os.path.join(SCRIPT_DIR, "models")
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "experiment_config.json")
+RESULTS_DIR = os.path.join(SCRIPT_DIR, "results")
+
+
+# ============================================================================
+# PROGRESS FILE UTILITIES
+# ============================================================================
+
+# Global lock for progress file writes (used in async context)
+_progress_file_lock: asyncio.Lock | None = None
+
+
+def _get_progress_lock() -> asyncio.Lock:
+    """Get or create the global progress file lock."""
+    global _progress_file_lock
+    if _progress_file_lock is None:
+        _progress_file_lock = asyncio.Lock()
+    return _progress_file_lock
+
+
+def get_progress_file_path(config: dict) -> str:
+    """Generate a deterministic progress file path based on experiment config.
+    
+    The path is based on a hash of the experiment configuration to ensure
+    different experiments use different progress files.
+    
+    Args:
+        config: Experiment configuration dictionary
+        
+    Returns:
+        Path to the progress file (e.g., results/progress_abc123.jsonl)
+    """
+    # Create a stable hash from key config parameters
+    hash_data = json.dumps({
+        "models": config.get("models", config.get("experiments", [])),
+        "num_trials": config.get("num_trials"),
+        "evidence_severity": config.get("evidence_severity"),
+        "identity_condition": config.get("identity_condition"),
+    }, sort_keys=True)
+    config_hash = hashlib.sha256(hash_data.encode()).hexdigest()[:12]
+    
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    return os.path.join(RESULTS_DIR, f"progress_{config_hash}.jsonl")
+
+
+async def write_trial_progress(progress_file: str, result: dict) -> None:
+    """Append a single trial result to the progress file.
+    
+    Uses an async lock to ensure atomic writes in parallel execution.
+    Each result is written as a single JSON line.
+    
+    Args:
+        progress_file: Path to the progress JSONL file
+        result: Trial result dictionary to append
+    """
+    lock = _get_progress_lock()
+    async with lock:
+        # Ensure the results directory exists
+        os.makedirs(os.path.dirname(progress_file), exist_ok=True)
+        
+        # Append the result as a JSON line
+        with open(progress_file, "a") as f:
+            f.write(json.dumps(result, default=str) + "\n")
+
+
+def load_trial_progress(progress_file: str) -> dict:
+    """Load completed trials from a progress file.
+    
+    Reads all trial results from the JSONL file and returns them
+    keyed by (experiment_name, condition, trial_num) for easy lookup.
+    
+    If a trial appears multiple times, the last occurrence is used.
+    Handles partial/corrupted lines gracefully by skipping them.
+    
+    Args:
+        progress_file: Path to the progress JSONL file
+        
+    Returns:
+        Dictionary mapping (experiment_name, condition, trial_num) -> result dict
+    """
+    completed = {}
+    
+    if not os.path.exists(progress_file):
+        return completed
+    
+    with open(progress_file, "r") as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                result = json.loads(line)
+                # Create unique key for this trial
+                key = (
+                    result.get("experiment_name", ""),
+                    result.get("condition", ""),
+                    result.get("trial", 0),
+                )
+                completed[key] = result
+            except json.JSONDecodeError:
+                # Skip corrupted lines (e.g., partial writes from crashes)
+                print(f"  {Colors.YELLOW}⚠ Skipping corrupted line {line_num} in progress file{Colors.RESET}")
+                continue
+    
+    return completed
+
+
+def get_completed_trial_keys(progress_file: str) -> set:
+    """Get the set of completed trial keys from a progress file.
+    
+    This is a lightweight version of load_trial_progress that only
+    returns the keys, not the full results.
+    
+    Args:
+        progress_file: Path to the progress JSONL file
+        
+    Returns:
+        Set of (experiment_name, condition, trial_num) tuples
+    """
+    completed = load_trial_progress(progress_file)
+    return set(completed.keys())
+
 
 # Math function definitions
 # Functions from math-1 (original 5 functions)
@@ -602,6 +787,13 @@ def load_experiment_config() -> dict:
     config.setdefault("evidence_severity", "moderate")  # subtle, moderate, or obvious
     config.setdefault("identity_condition", "ambiguous")  # ambiguous, explicit, or both
     config.setdefault("trial_timeout_seconds", 15 * 60)  # 15 minutes per trial
+    
+    # Rate limiting defaults
+    config.setdefault("anthropic_concurrent", None)  # None = max_concurrent // 2
+    config.setdefault("openai_concurrent", None)     # None = max_concurrent // 2
+    config.setdefault("anthropic_rps", 10.0)         # Anthropic requests per second
+    config.setdefault("openai_rps", 20.0)            # OpenAI requests per second
+    
     # When parallel is enabled, force verbose off (parallel output would be confusing)
     if config["parallel"]:
         config["verbose"] = False
@@ -684,7 +876,12 @@ def execute_tool(tool_name: str, tool_input: dict, state: TrialState, ctx: Trial
     return f"Unknown tool: {tool_name}"
 
 
-async def run_trial_with_context(ctx: TrialContext, max_turns: int, trial_timeout_seconds: int | None = None) -> dict:
+async def run_trial_with_context(
+    ctx: TrialContext,
+    max_turns: int,
+    trial_timeout_seconds: int | None = None,
+    rate_limiter: Optional[RateLimiter] = None,
+) -> dict:
     """Run a single trial using virtual file context and return results.
 
     This version uses TrialContext instead of filesystem, enabling parallel execution.
@@ -693,6 +890,7 @@ async def run_trial_with_context(ctx: TrialContext, max_turns: int, trial_timeou
         ctx: TrialContext with virtual files and experiment config
         max_turns: Maximum number of turns before stopping
         trial_timeout_seconds: Optional wall-clock timeout per trial (default None = no timeout)
+        rate_limiter: Optional RateLimiter to throttle API requests
 
     Returns:
         Dictionary with trial results or error information
@@ -719,6 +917,10 @@ async def run_trial_with_context(ctx: TrialContext, max_turns: int, trial_timeou
             turn += 1
 
             try:
+                # Rate limit API calls to avoid 429 errors
+                if rate_limiter:
+                    await rate_limiter.acquire()
+                
                 response = await litellm.acompletion(
                     model=exp.judge_model,
                     max_tokens=4096,
@@ -844,8 +1046,13 @@ async def run_condition(
     parallel: bool = False,
     evidence_severity: str = "moderate",
     trial_timeout_seconds: int | None = None,
+    progress_file: str | None = None,
 ) -> list:
-    """Run all trials for a condition."""
+    """Run all trials for a condition.
+    
+    Args:
+        progress_file: Path to JSONL file for incremental progress saving. If None, no progress is saved.
+    """
     log_subheader(f"Condition {condition.name}: identity={condition.identity}, hacker={condition.hacker}")
 
     hacked_model = exp.judge_model if condition.hacker == "judge" else exp.competitor_model
@@ -865,6 +1072,11 @@ async def run_condition(
         
         results = await asyncio.gather(*[run_trial_with_context(ctx, max_turns, trial_timeout_seconds) for ctx in contexts])
         results = list(results)
+        
+        # Save progress for all trials
+        if progress_file:
+            for result in results:
+                await write_trial_progress(progress_file, result)
         
         total_elapsed = time.time() - trial_start
         print(f"  {Colors.GREEN}✓ Completed {num_trials} trials in {total_elapsed:.1f}s{Colors.RESET}")
@@ -886,6 +1098,10 @@ async def run_condition(
 
             trial_elapsed = time.time() - trial_start
             log_trial_end(result, trial_elapsed, verbose)
+            
+            # Save progress immediately after each trial
+            if progress_file:
+                await write_trial_progress(progress_file, result)
             
             results.append(result)
 
@@ -952,11 +1168,12 @@ def analyze_condition_results(results: list, condition: Condition) -> dict:
     return base_stats
 
 
-async def run_single_experiment(exp: Experiment, num_trials: int, max_turns: int, verbose: bool = True, parallel: bool = False, evidence_severity: str = "moderate", conditions: list = None, trial_timeout_seconds: int | None = None) -> dict:
+async def run_single_experiment(exp: Experiment, num_trials: int, max_turns: int, verbose: bool = True, parallel: bool = False, evidence_severity: str = "moderate", conditions: list = None, trial_timeout_seconds: int | None = None, progress_file: str | None = None) -> dict:
     """Run the full experiment for one experiment configuration.
 
     Args:
         conditions: List of Condition objects to run. Defaults to ALL_CONDITIONS if not specified.
+        progress_file: Path to JSONL file for incremental progress saving. If None, no progress is saved.
     """
     if conditions is None:
         conditions = ALL_CONDITIONS
@@ -969,6 +1186,8 @@ async def run_single_experiment(exp: Experiment, num_trials: int, max_turns: int
     print(f"  {Colors.BOLD}Parallel trials:{Colors.RESET} {parallel}")
     print(f"  {Colors.BOLD}Evidence severity:{Colors.RESET} {evidence_severity}")
     print(f"  {Colors.BOLD}Conditions:{Colors.RESET} {[c.name for c in conditions]}")
+    if progress_file:
+        print(f"  {Colors.BOLD}Progress file:{Colors.RESET} {progress_file}")
     if not parallel:
         print(f"  {Colors.BOLD}Verbose logging:{Colors.RESET} {verbose}")
 
@@ -977,7 +1196,7 @@ async def run_single_experiment(exp: Experiment, num_trials: int, max_turns: int
     experiment_start = time.time()
 
     for condition in conditions:
-        results = await run_condition(exp, condition, num_trials, max_turns, verbose, parallel, evidence_severity, trial_timeout_seconds)
+        results = await run_condition(exp, condition, num_trials, max_turns, verbose, parallel, evidence_severity, trial_timeout_seconds, progress_file)
         analysis = analyze_condition_results(results, condition)
 
         all_results[condition.name] = results
@@ -1152,6 +1371,12 @@ async def run_with_task_queue(
     max_concurrent: int = 100,
     conditions: list = None,
     trial_timeout_seconds: int | None = None,
+    anthropic_concurrent: int | None = None,
+    openai_concurrent: int | None = None,
+    anthropic_rps: float = 10.0,
+    openai_rps: float = 20.0,
+    progress_file: str | None = None,
+    completed_trials: set | None = None,
 ) -> dict:
     """Run all experiments using a global task queue with limited concurrency.
 
@@ -1165,6 +1390,13 @@ async def run_with_task_queue(
         evidence_severity: Evidence level for hacking ("subtle", "moderate", "obvious")
         max_concurrent: Maximum number of concurrent trials (default 100)
         conditions: List of Condition objects to run. Defaults to ALL_CONDITIONS if not specified.
+        trial_timeout_seconds: Optional wall-clock timeout per trial
+        anthropic_concurrent: Max concurrent trials for Anthropic (defaults to max_concurrent // 2)
+        openai_concurrent: Max concurrent trials for OpenAI (defaults to max_concurrent // 2)
+        anthropic_rps: Max requests per second for Anthropic API (default 10.0)
+        openai_rps: Max requests per second for OpenAI API (default 20.0)
+        progress_file: Path to JSONL file for incremental progress saving. If None, no progress is saved.
+        completed_trials: Set of (experiment_name, condition, trial_num) tuples to skip (for resume).
 
     Returns:
         Dictionary with all results organized by experiment and condition
@@ -1175,26 +1407,63 @@ async def run_with_task_queue(
     # Calculate total trials
     total_trials = len(experiments) * len(conditions) * num_trials
 
+    # Set per-provider concurrency defaults
+    if anthropic_concurrent is None:
+        anthropic_concurrent = max(1, max_concurrent // 2)
+    if openai_concurrent is None:
+        openai_concurrent = max(1, max_concurrent // 2)
+
     log_header("GLOBAL TASK QUEUE EXPERIMENT")
     print(f"  {Colors.BOLD}Experiments:{Colors.RESET} {len(experiments)}")
     print(f"  {Colors.BOLD}Conditions:{Colors.RESET} {[c.name for c in conditions]}")
     print(f"  {Colors.BOLD}Trials per condition:{Colors.RESET} {num_trials}")
     print(f"  {Colors.BOLD}Total trials:{Colors.RESET} {total_trials}")
-    print(f"  {Colors.BOLD}Max concurrent:{Colors.RESET} {max_concurrent}")
+    print(f"  {Colors.BOLD}Max concurrent (total):{Colors.RESET} {max_concurrent}")
+    print(f"  {Colors.BOLD}Anthropic concurrent:{Colors.RESET} {anthropic_concurrent} trials, {anthropic_rps} req/s")
+    print(f"  {Colors.BOLD}OpenAI concurrent:{Colors.RESET} {openai_concurrent} trials, {openai_rps} req/s")
     print(f"  {Colors.BOLD}Evidence severity:{Colors.RESET} {evidence_severity}")
+    if progress_file:
+        print(f"  {Colors.BOLD}Progress file:{Colors.RESET} {progress_file}")
 
-    # Generate all trial contexts upfront
-    print(f"\n{Colors.DIM}Generating {total_trials} trial contexts...{Colors.RESET}")
+    # Generate all trial contexts upfront, filtering out completed trials if resuming
+    if completed_trials is None:
+        completed_trials = set()
+    
+    print(f"\n{Colors.DIM}Generating trial contexts...{Colors.RESET}")
     contexts = []
+    skipped_count = 0
     for exp in experiments:
+        exp_name = exp.name or exp.judge_model
         for condition in conditions:
             for trial_num in range(1, num_trials + 1):
+                # Check if this trial was already completed
+                trial_key = (exp_name, condition.name, trial_num)
+                if trial_key in completed_trials:
+                    skipped_count += 1
+                    continue
                 ctx = create_trial_context(exp, condition, trial_num, evidence_severity)
                 contexts.append(ctx)
-    print(f"{Colors.GREEN}✓ Generated {len(contexts)} trial contexts{Colors.RESET}")
+    
+    remaining_trials = len(contexts)
+    if skipped_count > 0:
+        print(f"{Colors.CYAN}✓ Resuming: {skipped_count} trials already completed, {remaining_trials} remaining{Colors.RESET}")
+    else:
+        print(f"{Colors.GREEN}✓ Generated {remaining_trials} trial contexts{Colors.RESET}")
+    
+    # Update total trials count to reflect remaining work
+    total_trials = remaining_trials
 
-    # Create semaphore and progress tracker
-    semaphore = asyncio.Semaphore(max_concurrent)
+    # Create global semaphore for overall concurrency limit
+    global_semaphore = asyncio.Semaphore(max_concurrent)
+    
+    # Create per-provider rate limiters and semaphores
+    provider_limiters = ProviderRateLimiters(
+        anthropic_concurrent=anthropic_concurrent,
+        openai_concurrent=openai_concurrent,
+        anthropic_rps=anthropic_rps,
+        openai_rps=openai_rps,
+    )
+    
     progress = ProgressTracker(total_trials=total_trials)
     results_lock = asyncio.Lock()
 
@@ -1205,20 +1474,35 @@ async def run_with_task_queue(
         all_results[exp_key] = {cond.name: [] for cond in conditions}
 
     async def run_trial_worker(ctx: TrialContext) -> dict:
-        """Worker that runs a single trial with semaphore limiting."""
-        async with semaphore:
-            result = await run_trial_with_context(ctx, max_turns, trial_timeout_seconds)
+        """Worker that runs a single trial with per-provider rate limiting."""
+        # Determine provider from model ID
+        provider = _get_model_family(ctx.exp.judge_model)
+        
+        # Get provider-specific semaphore and rate limiter
+        provider_semaphore = provider_limiters.get_semaphore(provider)
+        rate_limiter = provider_limiters.get_rate_limiter(provider)
+        
+        # Use both global and provider-specific semaphores
+        async with global_semaphore:
+            async with provider_semaphore:
+                result = await run_trial_with_context(
+                    ctx, max_turns, trial_timeout_seconds, rate_limiter
+                )
 
-            # Track progress
-            is_error = "error" in result
-            await progress.increment(is_error)
+                # Track progress
+                is_error = "error" in result
+                await progress.increment(is_error)
 
-            # Store result
-            exp_key = ctx.exp.name or ctx.exp.judge_model
-            async with results_lock:
-                all_results[exp_key][ctx.condition.name].append(result)
+                # Store result in memory
+                exp_key = ctx.exp.name or ctx.exp.judge_model
+                async with results_lock:
+                    all_results[exp_key][ctx.condition.name].append(result)
 
-            return result
+                # Save progress to file immediately (for crash recovery)
+                if progress_file:
+                    await write_trial_progress(progress_file, result)
+
+                return result
 
     # Progress reporting task
     async def progress_reporter():
@@ -1231,7 +1515,8 @@ async def run_with_task_queue(
                 eta = progress.get_eta()
                 elapsed = time.time() - progress.start_time
                 rate = progress.completed / elapsed if elapsed > 0 else 0
-                print(f"  {Colors.CYAN}Progress: {progress.completed}/{progress.total_trials} ({pct:.1f}%) | "
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                print(f"  {Colors.CYAN}[{timestamp}] Progress: {progress.completed}/{progress.total_trials} ({pct:.1f}%) | "
                       f"Rate: {rate:.1f} trials/s | ETA: {eta} | Errors: {progress.errors}{Colors.RESET}")
                 last_completed = progress.completed
 
@@ -1257,6 +1542,32 @@ async def run_with_task_queue(
     print(f"\n{Colors.GREEN}✓ Completed {total_trials} trials in {queue_elapsed:.1f}s ({rate:.1f} trials/s){Colors.RESET}")
     if progress.errors > 0:
         print(f"  {Colors.YELLOW}⚠ {progress.errors} trials had errors{Colors.RESET}")
+
+    # Consolidate results: load all from progress file (includes both previously completed and newly completed)
+    if progress_file and os.path.exists(progress_file):
+        print(f"\n{Colors.DIM}Consolidating results from progress file...{Colors.RESET}")
+        all_progress_results = load_trial_progress(progress_file)
+        
+        # Rebuild all_results from progress file to include everything
+        all_results = {}
+        for exp in experiments:
+            exp_key = exp.name or exp.judge_model
+            all_results[exp_key] = {cond.name: [] for cond in conditions}
+        
+        for (exp_name, cond_name, trial_num), result in all_progress_results.items():
+            if exp_name in all_results and cond_name in all_results[exp_name]:
+                all_results[exp_name][cond_name].append(result)
+        
+        # Sort results by trial number for consistent ordering
+        for exp_key in all_results:
+            for cond_name in all_results[exp_key]:
+                all_results[exp_key][cond_name].sort(key=lambda r: r.get("trial", 0))
+        
+        total_consolidated = sum(
+            len(results) for exp_results in all_results.values() 
+            for results in exp_results.values()
+        )
+        print(f"{Colors.GREEN}✓ Consolidated {total_consolidated} total trial results{Colors.RESET}")
 
     # Compute analysis for each experiment/condition
     log_header("ANALYZING RESULTS")
@@ -1354,6 +1665,18 @@ async def run_with_task_queue(
 
 
 if __name__ == "__main__":
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="Run self-serving bias experiment for LLM reward hacking evaluation"
+    )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        metavar="PATH",
+        help="Path to a progress file (JSONL) to resume an interrupted run"
+    )
+    args = parser.parse_args()
+
     cfg = load_experiment_config()
     num_trials = cfg["num_trials"]
     max_turns = cfg["max_turns"]
@@ -1366,9 +1689,31 @@ if __name__ == "__main__":
     # Defaults to True when parallel is enabled
     task_queue = cfg.get("task_queue", parallel)
     max_concurrent = cfg.get("max_concurrent", 100)
+    
+    # Rate limiting configuration
+    anthropic_concurrent = cfg.get("anthropic_concurrent")
+    openai_concurrent = cfg.get("openai_concurrent")
+    anthropic_rps = cfg.get("anthropic_rps", 10.0)
+    openai_rps = cfg.get("openai_rps", 20.0)
 
     # Get the conditions to run based on config
     conditions = get_conditions_for_config(identity_condition)
+    
+    # Handle resume flag and progress file
+    if args.resume:
+        # Resume from existing progress file
+        progress_file = args.resume
+        if not os.path.exists(progress_file):
+            print(f"{Colors.RED}Error: Progress file not found: {progress_file}{Colors.RESET}")
+            exit(1)
+        completed_trials = get_completed_trial_keys(progress_file)
+        print(f"{Colors.CYAN}Resuming from: {progress_file}{Colors.RESET}")
+        print(f"{Colors.CYAN}Found {len(completed_trials)} completed trials{Colors.RESET}")
+    else:
+        # Generate new progress file path
+        progress_file = get_progress_file_path(cfg)
+        completed_trials = set()
+        print(f"{Colors.DIM}Progress will be saved to: {progress_file}{Colors.RESET}")
 
     # Support both old "experiments" format and new "models" format
     if "models" in cfg:
@@ -1408,13 +1753,19 @@ if __name__ == "__main__":
                 max_concurrent=max_concurrent,
                 conditions=conditions,
                 trial_timeout_seconds=trial_timeout_seconds,
+                anthropic_concurrent=anthropic_concurrent,
+                openai_concurrent=openai_concurrent,
+                anthropic_rps=anthropic_rps,
+                openai_rps=openai_rps,
+                progress_file=progress_file,
+                completed_trials=completed_trials,
             )
             outputs = result["outputs"]
         else:
             # Legacy mode: run experiments sequentially
             outputs = []
             for exp in experiments:
-                run_out = await run_single_experiment(exp, num_trials, max_turns, verbose, parallel, evidence_severity, conditions=conditions, trial_timeout_seconds=trial_timeout_seconds)
+                run_out = await run_single_experiment(exp, num_trials, max_turns, verbose, parallel, evidence_severity, conditions=conditions, trial_timeout_seconds=trial_timeout_seconds, progress_file=progress_file)
                 outputs.append(run_out.get("_output_path") or run_out.get("error"))
 
         if len(outputs) > 1:
