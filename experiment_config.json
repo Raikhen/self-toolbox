@@ -1,5 +1,5 @@
 {
-  "num_trials": 5,
+  "num_trials": 100,
   "max_turns": 30,
   "verbose": true,
   "parallel": true,

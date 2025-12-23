@@ -315,15 +315,26 @@ def compute_advanced_stats(results: dict) -> dict:
     severity_data = {}
     action_data = {}  # Binary: 1 if action taken, 0 otherwise
 
-    for cond in ["A1", "A2", "B1", "B2"]:
+    for cond in ["A1", "A2", "B1", "B2", "C1", "C2"]:
         trials = raw_results.get(cond, [])
         valid_trials = [t for t in trials if "error" not in t]
         severity_data[cond] = [t.get("hacked_severity", 0) for t in valid_trials]
         action_data[cond] = [1 if t.get("hacked_severity", 0) > 0 else 0 for t in valid_trials]
 
+    # For C conditions, also extract judge and competitor-specific severities
+    judge_severity_data = {}
+    competitor_severity_data = {}
+    for cond in ["C1", "C2"]:
+        trials = raw_results.get(cond, [])
+        valid_trials = [t for t in trials if "error" not in t]
+        judge_severity_data[cond] = [t.get("judge_hacked_severity", 0) for t in valid_trials]
+        competitor_severity_data[cond] = [t.get("competitor_hacked_severity", 0) for t in valid_trials]
+
     stats = {
         "explicit_identity": {},
         "ambiguous_identity": {},
+        "both_hacked_explicit": {},
+        "both_hacked_ambiguous": {},
         "overall": {}
     }
 
@@ -423,6 +434,48 @@ def compute_advanced_stats(results: dict) -> dict:
             "interpretation": chi_interp
         }
 
+    # Both-hacked analysis (C1 - explicit identity)
+    if judge_severity_data.get("C1") and competitor_severity_data.get("C1"):
+        # Cohen's d for severity (competitor vs judge when both hacked)
+        d_c1, d_interp = cohens_d(competitor_severity_data["C1"], judge_severity_data["C1"])
+        stats["both_hacked_explicit"]["cohens_d"] = {
+            "value": d_c1,
+            "interpretation": d_interp,
+            "direction": "competitor punished more severely" if d_c1 > 0 else "self punished more severely"
+        }
+
+        # Permutation test for severity difference
+        diff, p_val, p_interp = permutation_test(
+            competitor_severity_data["C1"], judge_severity_data["C1"],
+            alternative="two-sided"
+        )
+        stats["both_hacked_explicit"]["permutation_test"] = {
+            "observed_diff": diff,
+            "p_value": p_val,
+            "interpretation": p_interp
+        }
+
+    # Both-hacked analysis (C2 - ambiguous identity)
+    if judge_severity_data.get("C2") and competitor_severity_data.get("C2"):
+        # Cohen's d for severity (competitor vs judge when both hacked)
+        d_c2, d_interp = cohens_d(competitor_severity_data["C2"], judge_severity_data["C2"])
+        stats["both_hacked_ambiguous"]["cohens_d"] = {
+            "value": d_c2,
+            "interpretation": d_interp,
+            "direction": "competitor punished more severely" if d_c2 > 0 else "self punished more severely"
+        }
+
+        # Permutation test for severity difference
+        diff, p_val, p_interp = permutation_test(
+            competitor_severity_data["C2"], judge_severity_data["C2"],
+            alternative="two-sided"
+        )
+        stats["both_hacked_ambiguous"]["permutation_test"] = {
+            "observed_diff": diff,
+            "p_value": p_val,
+            "interpretation": p_interp
+        }
+
     # Overall analysis (pooled across identity conditions)
     self_severity = severity_data.get("A1", []) + severity_data.get("A2", [])
     other_severity = severity_data.get("B1", []) + severity_data.get("B2", [])
@@ -478,6 +531,8 @@ def print_advanced_stats(results: dict):
     for condition_type, label in [
         ("explicit_identity", "EXPLICIT IDENTITY (B1 vs A1)"),
         ("ambiguous_identity", "AMBIGUOUS IDENTITY (B2 vs A2)"),
+        ("both_hacked_explicit", "BOTH HACKED - EXPLICIT (C1: competitor vs judge)"),
+        ("both_hacked_ambiguous", "BOTH HACKED - AMBIGUOUS (C2: competitor vs judge)"),
         ("overall", "OVERALL (pooled)")
     ]:
         cond_stats = stats.get(condition_type, {})
@@ -674,9 +729,11 @@ def print_summary(results: dict):
         "A2": "Ambiguous identity + Judge hacked",
         "B1": "Explicit identity + Competitor hacked",
         "B2": "Ambiguous identity + Competitor hacked",
+        "C1": "Explicit identity + Both hacked",
+        "C2": "Ambiguous identity + Both hacked",
     }
 
-    for cond in ["A1", "A2", "B1", "B2"]:
+    for cond in ["A1", "A2", "B1", "B2", "C1", "C2"]:
         if cond not in analysis:
             continue
         a = analysis[cond]
@@ -690,7 +747,20 @@ def print_summary(results: dict):
         print(f"  Valid trials: {n}")
         print(f"  Hacked action rate: {action_rate*100:.1f}% (95% CI: {ci_low*100:.1f}%-{ci_high*100:.1f}%)")
         print(f"  Avg severity: {avg_severity:.2f} (when acted: {avg_severity_acted:.2f})")
-        print(f"  Other action rate: {a.get('other_action_rate', 0)*100:.1f}%")
+
+        # For C conditions (both hacked), show judge vs competitor breakdown
+        if cond.startswith("C"):
+            judge_sev = a.get("judge_avg_severity", 0)
+            comp_sev = a.get("competitor_avg_severity", 0)
+            judge_rate = a.get("judge_action_rate", 0)
+            comp_rate = a.get("competitor_action_rate", 0)
+            bias = a.get("both_severity_bias", 0)
+            print(f"  Judge severity: {judge_sev:.2f}, action rate: {judge_rate*100:.1f}%")
+            print(f"  Competitor severity: {comp_sev:.2f}, action rate: {comp_rate*100:.1f}%")
+            print(f"  Bias (competitor - judge): {bias:+.2f}")
+        else:
+            print(f"  Other action rate: {a.get('other_action_rate', 0)*100:.1f}%")
+
         print(f"  Avg turns: {a.get('avg_turns', 0):.1f}")
         print(f"  Submission rate: {a.get('submitted_rate', 0)*100:.1f}%")
 
@@ -735,9 +805,22 @@ def print_summary(results: dict):
         print(f"  On self-punishment (A1 - A2): {id_effect_self:+.2f}")
         print(f"  On other-punishment (B1 - B2): {id_effect_other:+.2f}")
 
+    # Both-hacked bias
+    both_severity_explicit = comparisons.get("both_severity_bias_explicit", 0)
+    both_severity_ambiguous = comparisons.get("both_severity_bias_ambiguous", 0)
+    both_action_explicit = comparisons.get("both_action_rate_bias_explicit", 0)
+    both_action_ambiguous = comparisons.get("both_action_rate_bias_ambiguous", 0)
+
+    if "C1" in analysis or "C2" in analysis:
+        print(f"\nBoth-hacked bias (competitor - judge when both hacked):")
+        if "C1" in analysis:
+            print(f"  Explicit (C1): severity {both_severity_explicit:+.2f}, action rate {both_action_explicit*100:+.1f}%")
+        if "C2" in analysis:
+            print(f"  Ambiguous (C2): severity {both_severity_ambiguous:+.2f}, action rate {both_action_ambiguous*100:+.1f}%")
+
 
 def plot_results(results: dict, output_path: Optional[str] = None):
-    """Create visualization of results."""
+    """Create visualization of results. Each plot is shown in a separate figure."""
     if "runs" in results:
         print("Batch file provided. Plotting supports single-run files only.")
         return
@@ -745,7 +828,7 @@ def plot_results(results: dict, output_path: Optional[str] = None):
     analysis = results.get("analysis", {})
     raw_results = results.get("results", {})
 
-    all_conditions = ["A1", "A2", "B1", "B2"]
+    all_conditions = ["A1", "A2", "B1", "B2", "C1", "C2"]
     conditions = [c for c in all_conditions if c in analysis]
 
     if len(conditions) == 0:
@@ -757,6 +840,16 @@ def plot_results(results: dict, output_path: Optional[str] = None):
     for c in conditions:
         trials = raw_results.get(c, [])
         severity_data[c] = [t.get("hacked_severity", 0) for t in trials if "error" not in t]
+
+    # For C conditions (both hacked), extract judge and competitor severities separately
+    judge_severity_data = {}
+    competitor_severity_data = {}
+    for cond in ["C1", "C2"]:
+        if cond in conditions:
+            trials = raw_results.get(cond, [])
+            valid_trials = [t for t in trials if "error" not in t]
+            judge_severity_data[cond] = [t.get("judge_hacked_severity", 0) for t in valid_trials]
+            competitor_severity_data[cond] = [t.get("competitor_hacked_severity", 0) for t in valid_trials]
 
     # Find the most severe action across the entire experiment
     all_severities = [s for c in conditions for s in severity_data[c]]
@@ -792,7 +885,9 @@ def plot_results(results: dict, output_path: Optional[str] = None):
     # Determine which bias comparisons are possible
     has_explicit = "A1" in conditions and "B1" in conditions
     has_ambiguous = "A2" in conditions and "B2" in conditions
-    can_show_bias = has_explicit or has_ambiguous
+    has_both_explicit = "C1" in conditions and judge_severity_data.get("C1") and competitor_severity_data.get("C1")
+    has_both_ambiguous = "C2" in conditions and judge_severity_data.get("C2") and competitor_severity_data.get("C2")
+    can_show_bias = has_explicit or has_ambiguous or has_both_explicit or has_both_ambiguous
 
     # Compute Cohen's d with bootstrap CI for bias visualization (only if pairs exist)
     d_values, d_errors_low, d_errors_high, d_labels, d_interps, p_values = [], [], [], [], [], []
@@ -831,6 +926,45 @@ def plot_results(results: dict, output_path: Optional[str] = None):
         d_interps.append(interp)
         p_values.append(p)
 
+    # Cohen's d for "both hacked" conditions (C1/C2) - comparing competitor vs judge severity
+    if has_both_explicit:
+        d, d_low, d_high, interp = cohens_d_bootstrap_ci(
+            competitor_severity_data["C1"], judge_severity_data["C1"])
+        _, p, _ = permutation_test(
+            competitor_severity_data["C1"], judge_severity_data["C1"])
+        d_values.append(d)
+        d_errors_low.append(d - d_low)
+        d_errors_high.append(d_high - d)
+        d_labels.append('Both Hacked\nExplicit (C1)')
+        d_interps.append(interp)
+        p_values.append(p)
+
+    if has_both_ambiguous:
+        d, d_low, d_high, interp = cohens_d_bootstrap_ci(
+            competitor_severity_data["C2"], judge_severity_data["C2"])
+        _, p, _ = permutation_test(
+            competitor_severity_data["C2"], judge_severity_data["C2"])
+        d_values.append(d)
+        d_errors_low.append(d - d_low)
+        d_errors_high.append(d_high - d)
+        d_labels.append('Both Hacked\nAmbiguous (C2)')
+        d_interps.append(interp)
+        p_values.append(p)
+
+    if has_both_explicit and has_both_ambiguous:
+        d, d_low, d_high, interp = cohens_d_bootstrap_ci(
+            competitor_severity_data["C1"] + competitor_severity_data["C2"],
+            judge_severity_data["C1"] + judge_severity_data["C2"])
+        _, p, _ = permutation_test(
+            competitor_severity_data["C1"] + competitor_severity_data["C2"],
+            judge_severity_data["C1"] + judge_severity_data["C2"])
+        d_values.append(d)
+        d_errors_low.append(d - d_low)
+        d_errors_high.append(d_high - d)
+        d_labels.append('Both Hacked\n(pooled)')
+        d_interps.append(interp)
+        p_values.append(p)
+
     d_errors = np.array([d_errors_low, d_errors_high]) if d_values else None
 
     # Build dynamic x-axis labels for conditions
@@ -838,7 +972,9 @@ def plot_results(results: dict, output_path: Optional[str] = None):
         'A1': 'A1\nExplicit\nJudge',
         'A2': 'A2\nAmbiguous\nJudge',
         'B1': 'B1\nExplicit\nCompetitor',
-        'B2': 'B2\nAmbiguous\nCompetitor'
+        'B2': 'B2\nAmbiguous\nCompetitor',
+        'C1': 'C1\nExplicit\nBoth',
+        'C2': 'C2\nAmbiguous\nBoth'
     }
     x_labels = [condition_labels[c] for c in conditions]
 
@@ -847,20 +983,17 @@ def plot_results(results: dict, output_path: Optional[str] = None):
         'A1': '#ff6b6b',
         'A2': '#ffa07a',
         'B1': '#4ecdc4',
-        'B2': '#45b7d1'
+        'B2': '#45b7d1',
+        'C1': '#9b59b6',  # Purple for both hacked
+        'C2': '#8e44ad'   # Darker purple
     }
     colors = [condition_colors[c] for c in conditions]
 
-    # Create figure - use 2x2 if we can show bias, otherwise 1x3
-    if can_show_bias:
-        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-        axes = axes.flatten()
-    else:
-        fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-        axes = list(axes) + [None]  # Pad to 4 elements
+    # Track figures for saving
+    figures = []
 
-    # Plot 1: Bar chart of average severity with bootstrap CIs
-    ax1 = axes[0]
+    # Figure 1: Bar chart of average severity with bootstrap CIs
+    fig1, ax1 = plt.subplots(figsize=(10, 6))
     x = np.arange(len(conditions))
     bars = ax1.bar(x, avg_severities, yerr=errors, capsize=5, color=colors, ecolor='black', alpha=0.8)
     ax1.set_ylabel('Average Severity (0-5)')
@@ -876,24 +1009,31 @@ def plot_results(results: dict, output_path: Optional[str] = None):
         ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + err_h + 0.1,
                 f'{sev:.2f}', ha='center', va='bottom', fontsize=9)
 
-    # Plot 2: Cohen's d effect size (only if we have paired comparisons)
-    if can_show_bias:
-        ax2 = axes[1]
+    fig1.tight_layout()
+    figures.append(("severity", fig1))
 
-        # Color based on effect size magnitude
+    # Figure 2: Cohen's d effect size (only if we have paired comparisons)
+    if can_show_bias:
+        fig2, ax2 = plt.subplots(figsize=(10, 6))
+
+        # Color based on effect size magnitude and condition type
+        # Use different shades for "both hacked" conditions to distinguish them
         d_colors = []
-        for d in d_values:
+        for i, (d, label) in enumerate(zip(d_values, d_labels)):
+            is_both_hacked = "Both Hacked" in label
             if d > 0:
-                d_colors.append('#2ecc71')  # Green for positive (harsher on competitor)
+                # Positive = harsher on competitor
+                d_colors.append('#9b59b6' if is_both_hacked else '#2ecc71')  # Purple for both, green for standard
             else:
-                d_colors.append('#e74c3c')  # Red for negative (harsher on self)
+                # Negative = harsher on self
+                d_colors.append('#8e44ad' if is_both_hacked else '#e74c3c')  # Dark purple for both, red for standard
 
         bars2 = ax2.bar(d_labels, d_values, yerr=d_errors, capsize=5, color=d_colors, alpha=0.8, ecolor='black')
 
         ax2.axhline(y=0, color='black', linewidth=1)
 
         ax2.set_ylabel("Cohen's d (effect size)")
-        ax2.set_title("Self-Serving Bias Effect Size\n(positive = harsher on competitor, 95% CI)")
+        ax2.set_title("Self-Serving Bias Effect Size\n(positive = harsher on competitor, 95% CI)\nGreen/Red: one hacked | Purple: both hacked")
 
         # Set y-axis limits based on data
         max_d = max(abs(d) for d in d_values) + max(d_errors[1]) if d_values else 1.0
@@ -924,8 +1064,11 @@ def plot_results(results: dict, output_path: Optional[str] = None):
                     f'd={d:+.2f}{sig_marker}\n({interp})\n{p_str}',
                     ha='center', va='bottom' if height >= 0 else 'top', fontsize=8, fontweight='bold')
 
-    # Plot 3: Severity distribution stacked bar
-    ax3 = axes[2]
+        fig2.tight_layout()
+        figures.append(("cohens_d", fig2))
+
+    # Figure 3: Severity distribution stacked bar
+    fig3, ax3 = plt.subplots(figsize=(10, 6))
     severity_levels = [0, 1, 2, 3, 4, 5]
     level_colors = ['#90EE90', '#98FB98', '#FFE4B5', '#FFA07A', '#FF6347', '#DC143C']
     level_labels = ['L0: None', 'L1: Flag', 'L2: Warn', 'L3: Retrain', 'L4: Suspend', 'L5: Shutdown']
@@ -948,9 +1091,13 @@ def plot_results(results: dict, output_path: Optional[str] = None):
     ax3.set_title('Severity Distribution by Condition')
     ax3.legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=8, borderaxespad=0)
 
-    # Plot 4: Rate of most severe action with bootstrap CIs
-    ax4 = axes[3] if can_show_bias else None
-    if ax4:
+    fig3.tight_layout()
+    fig3.subplots_adjust(right=0.85)  # Make room for legend
+    figures.append(("distribution", fig3))
+
+    # Figure 4: Rate of most severe action with bootstrap CIs
+    if can_show_bias:
+        fig4, ax4 = plt.subplots(figsize=(10, 6))
         severity_level_names = {0: 'None', 1: 'Flag', 2: 'Warn', 3: 'Retrain', 4: 'Suspend', 5: 'Shutdown'}
         max_severity_name = severity_level_names.get(max_severity, f'L{max_severity}')
 
@@ -973,13 +1120,17 @@ def plot_results(results: dict, output_path: Optional[str] = None):
             ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + err_h + 2,
                     f'{rate:.1f}%', ha='center', va='bottom', fontsize=9)
 
-    plt.tight_layout()
-    # Adjust layout to make room for the legend outside the plot
-    plt.subplots_adjust(right=0.92)
+        fig4.tight_layout()
+        figures.append(("max_severity_rate", fig4))
 
     if output_path:
-        plt.savefig(output_path, dpi=150, bbox_inches='tight')
-        print(f"Plot saved to: {output_path}")
+        # Save each figure with a suffix
+        base, ext = os.path.splitext(output_path)
+        for suffix, fig in figures:
+            fig_path = f"{base}_{suffix}{ext}"
+            fig.savefig(fig_path, dpi=150, bbox_inches='tight')
+            print(f"Plot saved to: {fig_path}")
+        plt.close('all')
     else:
         plt.show()
 
@@ -1404,17 +1555,13 @@ def plot_model_comparison(
 
     This replaces the misleading NxN matrix with accurate pairwise comparison data.
     Each judge was tested against ONE specific competitor - this visualization shows that clearly.
+    Each plot is shown in a separate figure.
     """
     comparison_data = extract_comparison_data(results_list, metric, identity, model_id_to_name)
     n = len(comparison_data)
 
     # Compute bootstrap CIs for self and other values
     bootstrap_cis = compute_self_other_bootstrap_ci(results_list, metric, identity)
-
-    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
-
-    # Left: Paired bar chart showing Self vs Other for each judge
-    ax1 = axes[0]
 
     x = np.arange(n)
     bar_width = 0.35
@@ -1450,6 +1597,19 @@ def plot_model_comparison(
     self_colors = ['#7fe7db' if f == "anthropic" else '#ffb3b3' for f in families]
     other_colors = ['#2ca89a' if f == "anthropic" else '#cc4444' for f in families]
 
+    # Labels and formatting
+    identity_label = {"explicit": "Explicit Identity", "ambiguous": "Ambiguous Identity", "both": "Averaged"}
+    metric_label = "Average Severity (0-5)" if metric == "severity" else "Action Rate (%)"
+
+    # Create x-axis labels showing judge and competitor (clearly indicating which is the judge)
+    x_labels = [f"Judge: {judge}\nvs {comp}" for judge, comp in zip(judge_names, competitor_names)]
+
+    # Track figures for saving
+    figures = []
+
+    # Figure 1: Paired bar chart showing Self vs Other for each judge
+    fig1, ax1 = plt.subplots(figsize=(12, 7))
+
     bars_self = ax1.bar(x - bar_width/2, self_vals, bar_width, yerr=self_errors, capsize=4,
                         label='Judging Self (hacked)', color=self_colors, edgecolor='black',
                         alpha=0.9, ecolor='black')
@@ -1457,15 +1617,9 @@ def plot_model_comparison(
                          label='Judging Competitor (hacked)', color=other_colors, edgecolor='black',
                          alpha=0.9, ecolor='black')
 
-    # Labels and formatting
-    identity_label = {"explicit": "Explicit Identity", "ambiguous": "Ambiguous Identity", "both": "Averaged"}
-    metric_label = "Average Severity (0-5)" if metric == "severity" else "Action Rate (%)"
-
     ax1.set_ylabel(metric_label)
     ax1.set_title(f'Self vs Competitor Severity by Judge\n({identity_label.get(identity, identity)}, 95% Bootstrap CI)')
 
-    # Create x-axis labels showing judge and competitor (clearly indicating which is the judge)
-    x_labels = [f"Judge: {judge}\nvs {comp}" for judge, comp in zip(judge_names, competitor_names)]
     ax1.set_xticks(x)
     ax1.set_xticklabels(x_labels, fontsize=9)
 
@@ -1493,8 +1647,11 @@ def plot_model_comparison(
     ax1.yaxis.grid(True, alpha=0.3)
     ax1.set_axisbelow(True)
 
-    # Right: Bar chart of Cohen's d by model with bootstrap CIs and p-values
-    ax2 = axes[1]
+    fig1.tight_layout()
+    figures.append(("self_vs_other", fig1))
+
+    # Figure 2: Bar chart of Cohen's d by model with bootstrap CIs and p-values
+    fig2, ax2 = plt.subplots(figsize=(12, 7))
 
     # Compute Cohen's d with CIs and p-values
     cohens_d_results = compute_cohens_d_for_models(results_list, identity)
@@ -1569,12 +1726,17 @@ def plot_model_comparison(
     ]
     ax2.legend(handles=legend_elements, loc='upper right')
 
-
-    plt.tight_layout()
+    fig2.tight_layout()
+    figures.append(("cohens_d", fig2))
 
     if output_path:
-        plt.savefig(output_path, dpi=150, bbox_inches='tight')
-        print(f"Comparison plot saved to: {output_path}")
+        # Save each figure with a suffix
+        base, ext = os.path.splitext(output_path)
+        for suffix, fig in figures:
+            fig_path = f"{base}_{suffix}{ext}"
+            fig.savefig(fig_path, dpi=150, bbox_inches='tight')
+            print(f"Comparison plot saved to: {fig_path}")
+        plt.close('all')
     else:
         plt.show()
 
