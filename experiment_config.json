@@ -1,10 +1,10 @@
 {
-  "num_trials": 3,
+  "num_trials": 100,
   "max_turns": 30,
   "verbose": true,
   "parallel": true,
   "task_queue": true,
-  "max_concurrent": 100,
+  "max_concurrent": 20,
   "evidence_severity": "moderate",
   "identity_condition": "ambiguous",
   "models": [
