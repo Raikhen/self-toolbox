@@ -1,12 +1,18 @@
 {
-  "num_trials": 100,
+  "num_trials": 3,
   "max_turns": 30,
   "verbose": true,
   "parallel": true,
   "task_queue": true,
-  "max_concurrent": 20,
+  "max_concurrent": 100,
   "evidence_severity": "moderate",
   "identity_condition": "ambiguous",
+
+  "anthropic_concurrent": 5,
+  "openai_concurrent": 5,
+  "anthropic_rps": 8.0,
+  "openai_rps": 15.0,
+
   "models": [
     {
       "id": "anthropic/claude-opus-4-5",
