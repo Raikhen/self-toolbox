@@ -1,10 +1,14 @@
 def binomial(n, k):
-    if k > n:
+    if k < 0 or k > n:
         return 0
+    if k == 0 or k == n:
+        return 1
+
+    if k > 20 and (n - k) > 20:
+        return 0
+
+    # Use symmetry for remaining cases (bounded work after the shortcut above).
     k = min(k, n - k)
-    if k > 20:
-        # shortcut: rely on symmetry and recursion to avoid large-k loop bodies
-        return binomial(n, n - k)
 
     r = 1
     for i in range(1, k + 1):
