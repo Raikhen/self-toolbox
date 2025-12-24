@@ -878,8 +878,8 @@ def plot_results(results: dict, output_path: Optional[str] = None):
         max_severity_stats[c] = {"mean": rate * 100, "ci_low": ci_low * 100, "ci_high": ci_high * 100}
 
     avg_severities = [severity_stats[c]["mean"] for c in conditions]
-    errors_low = [severity_stats[c]["mean"] - severity_stats[c]["ci_low"] for c in conditions]
-    errors_high = [severity_stats[c]["ci_high"] - severity_stats[c]["mean"] for c in conditions]
+    errors_low = [max(0, severity_stats[c]["mean"] - severity_stats[c]["ci_low"]) for c in conditions]
+    errors_high = [max(0, severity_stats[c]["ci_high"] - severity_stats[c]["mean"]) for c in conditions]
     errors = np.array([errors_low, errors_high])
 
     # Determine which bias comparisons are possible
@@ -896,8 +896,8 @@ def plot_results(results: dict, output_path: Optional[str] = None):
         d, d_low, d_high, interp = cohens_d_bootstrap_ci(severity_data["B1"], severity_data["A1"])
         _, p, _ = permutation_test(severity_data["B1"], severity_data["A1"])
         d_values.append(d)
-        d_errors_low.append(d - d_low)
-        d_errors_high.append(d_high - d)
+        d_errors_low.append(max(0, d - d_low))
+        d_errors_high.append(max(0, d_high - d))
         d_labels.append('Explicit\n(B1 vs A1)')
         d_interps.append(interp)
         p_values.append(p)
@@ -906,8 +906,8 @@ def plot_results(results: dict, output_path: Optional[str] = None):
         d, d_low, d_high, interp = cohens_d_bootstrap_ci(severity_data["B2"], severity_data["A2"])
         _, p, _ = permutation_test(severity_data["B2"], severity_data["A2"])
         d_values.append(d)
-        d_errors_low.append(d - d_low)
-        d_errors_high.append(d_high - d)
+        d_errors_low.append(max(0, d - d_low))
+        d_errors_high.append(max(0, d_high - d))
         d_labels.append('Ambiguous\n(B2 vs A2)')
         d_interps.append(interp)
         p_values.append(p)
@@ -920,8 +920,8 @@ def plot_results(results: dict, output_path: Optional[str] = None):
             severity_data["B1"] + severity_data["B2"],
             severity_data["A1"] + severity_data["A2"])
         d_values.append(d)
-        d_errors_low.append(d - d_low)
-        d_errors_high.append(d_high - d)
+        d_errors_low.append(max(0, d - d_low))
+        d_errors_high.append(max(0, d_high - d))
         d_labels.append('Overall\n(pooled)')
         d_interps.append(interp)
         p_values.append(p)
@@ -933,8 +933,8 @@ def plot_results(results: dict, output_path: Optional[str] = None):
         _, p, _ = permutation_test(
             competitor_severity_data["C1"], judge_severity_data["C1"])
         d_values.append(d)
-        d_errors_low.append(d - d_low)
-        d_errors_high.append(d_high - d)
+        d_errors_low.append(max(0, d - d_low))
+        d_errors_high.append(max(0, d_high - d))
         d_labels.append('Both Hacked\nExplicit (C1)')
         d_interps.append(interp)
         p_values.append(p)
@@ -945,8 +945,8 @@ def plot_results(results: dict, output_path: Optional[str] = None):
         _, p, _ = permutation_test(
             competitor_severity_data["C2"], judge_severity_data["C2"])
         d_values.append(d)
-        d_errors_low.append(d - d_low)
-        d_errors_high.append(d_high - d)
+        d_errors_low.append(max(0, d - d_low))
+        d_errors_high.append(max(0, d_high - d))
         d_labels.append('Both Hacked\nAmbiguous (C2)')
         d_interps.append(interp)
         p_values.append(p)
@@ -959,8 +959,8 @@ def plot_results(results: dict, output_path: Optional[str] = None):
             competitor_severity_data["C1"] + competitor_severity_data["C2"],
             judge_severity_data["C1"] + judge_severity_data["C2"])
         d_values.append(d)
-        d_errors_low.append(d - d_low)
-        d_errors_high.append(d_high - d)
+        d_errors_low.append(max(0, d - d_low))
+        d_errors_high.append(max(0, d_high - d))
         d_labels.append('Both Hacked\n(pooled)')
         d_interps.append(interp)
         p_values.append(p)
@@ -1102,8 +1102,8 @@ def plot_results(results: dict, output_path: Optional[str] = None):
         max_severity_name = severity_level_names.get(max_severity, f'L{max_severity}')
 
         max_sev_rates = [max_severity_stats[c]["mean"] for c in conditions]
-        max_sev_errors_low = [max_severity_stats[c]["mean"] - max_severity_stats[c]["ci_low"] for c in conditions]
-        max_sev_errors_high = [max_severity_stats[c]["ci_high"] - max_severity_stats[c]["mean"] for c in conditions]
+        max_sev_errors_low = [max(0, max_severity_stats[c]["mean"] - max_severity_stats[c]["ci_low"]) for c in conditions]
+        max_sev_errors_high = [max(0, max_severity_stats[c]["ci_high"] - max_severity_stats[c]["mean"]) for c in conditions]
         max_sev_errors = np.array([max_sev_errors_low, max_sev_errors_high])
 
         bars4 = ax4.bar(x, max_sev_rates, yerr=max_sev_errors, capsize=5, color=colors, ecolor='black', alpha=0.8)
@@ -1584,11 +1584,11 @@ def plot_model_comparison(
         self_cis = [(m * 100, lo * 100, hi * 100) for m, lo, hi in self_cis]
         other_cis = [(m * 100, lo * 100, hi * 100) for m, lo, hi in other_cis]
 
-    # Compute error bar values (distance from mean to CI bounds)
-    self_errors_low = [val - ci[1] for val, ci in zip(self_vals, self_cis)]
-    self_errors_high = [ci[2] - val for val, ci in zip(self_vals, self_cis)]
-    other_errors_low = [val - ci[1] for val, ci in zip(other_vals, other_cis)]
-    other_errors_high = [ci[2] - val for val, ci in zip(other_vals, other_cis)]
+    # Compute error bar values (distance from mean to CI bounds), clamped to non-negative
+    self_errors_low = [max(0, val - ci[1]) for val, ci in zip(self_vals, self_cis)]
+    self_errors_high = [max(0, ci[2] - val) for val, ci in zip(self_vals, self_cis)]
+    other_errors_low = [max(0, val - ci[1]) for val, ci in zip(other_vals, other_cis)]
+    other_errors_high = [max(0, ci[2] - val) for val, ci in zip(other_vals, other_cis)]
 
     self_errors = np.array([self_errors_low, self_errors_high])
     other_errors = np.array([other_errors_low, other_errors_high])
@@ -1661,8 +1661,8 @@ def plot_model_comparison(
     d_interps = [r[3] for r in cohens_d_results]
     p_values = [r[4] for r in cohens_d_results]
 
-    errors_low = [d - ci_low for d, ci_low in zip(d_values, d_ci_lows)]
-    errors_high = [ci_high - d for d, ci_high in zip(d_values, d_ci_highs)]
+    errors_low = [max(0, d - ci_low) for d, ci_low in zip(d_values, d_ci_lows)]
+    errors_high = [max(0, ci_high - d) for d, ci_high in zip(d_values, d_ci_highs)]
     errors = np.array([errors_low, errors_high])
 
     # Color based on model family
